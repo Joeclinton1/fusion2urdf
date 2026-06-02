@@ -72,16 +72,17 @@ def run(context):
             return 0
         
         links_xyz_dict = {}
+        visual_meshes = utils.gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj')
 
         # --------------------
         # Generate URDF
-        Write.write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir, export_settings, materials_dict)
+        Write.write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir, export_settings, materials_dict, visual_meshes)
 
         # Generate STL files directly from top-level link occurrences. This keeps
         # nested CAD components inside their containing robot link and avoids
         # mutating the Fusion design for export.
         utils.export_stl_links(design, save_dir, link_occurrences)
-        utils.export_obj_links(design, save_dir, link_occurrences)
+        utils.export_obj_links(design, save_dir, link_occurrences, visual_meshes)
         
         ui.messageBox(msg + '\n\nProfile: ' + export_settings['profile'] + '\n' + save_dir, title)
         

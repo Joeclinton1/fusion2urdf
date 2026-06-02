@@ -11,7 +11,7 @@ from ..utils import utils
 
 class Link:
 
-    def __init__(self, name, xyz, center_of_mass, repo, mass, inertia_tensor, material_name='silver', visual_mesh_extension='stl'):
+    def __init__(self, name, xyz, center_of_mass, repo, mass, inertia_tensor, material_name='silver', visual_mesh_extension='stl', visual_meshes=None):
         """
         Parameters
         ----------
@@ -41,11 +41,28 @@ class Link:
         self.inertia_tensor = inertia_tensor
         self.material_name = material_name
         self.visual_mesh_extension = visual_mesh_extension
+        self.visual_meshes = visual_meshes or []
 
     def mesh_filename(self, extension='stl'):
         if self.repo.startswith('package://') or self.repo.startswith('../') or self.repo.startswith('./'):
             return self.repo + self.name + '.' + extension
         return 'package://' + self.repo + self.name + '.' + extension
+
+    def visual_mesh_filename(self, mesh_name, extension):
+        if self.repo.startswith('package://') or self.repo.startswith('../') or self.repo.startswith('./'):
+            return self.repo + mesh_name + '.' + extension
+        return 'package://' + self.repo + mesh_name + '.' + extension
+
+    def add_visual_xml(self, link, mesh_name, extension, material_name=None):
+        visual = SubElement(link, 'visual')
+        origin_v = SubElement(visual, 'origin')
+        origin_v.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]), 'rpy':'0 0 0'}
+        geometry_v = SubElement(visual, 'geometry')
+        mesh_v = SubElement(geometry_v, 'mesh')
+        mesh_v.attrib = {'filename':self.visual_mesh_filename(mesh_name, extension),'scale':'0.001 0.001 0.001'}
+        if extension.lower() == 'stl':
+            material = SubElement(visual, 'material')
+            material.attrib = {'name':material_name or self.material_name}
         
     def make_link_xml(self):
         """
@@ -68,15 +85,16 @@ class Link:
             'iyz':str(self.inertia_tensor[4]), 'ixz':str(self.inertia_tensor[5])}        
         
         # visual
-        visual = SubElement(link, 'visual')
-        origin_v = SubElement(visual, 'origin')
-        origin_v.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]), 'rpy':'0 0 0'}
-        geometry_v = SubElement(visual, 'geometry')
-        mesh_v = SubElement(geometry_v, 'mesh')
-        mesh_v.attrib = {'filename':self.mesh_filename(self.visual_mesh_extension),'scale':'0.001 0.001 0.001'}
-        if self.visual_mesh_extension.lower() == 'stl':
-            material = SubElement(visual, 'material')
-            material.attrib = {'name':self.material_name}
+        if self.visual_meshes:
+            for visual_mesh in self.visual_meshes:
+                self.add_visual_xml(
+                    link,
+                    visual_mesh.get('mesh_name', self.name),
+                    visual_mesh.get('extension', self.visual_mesh_extension),
+                    visual_mesh.get('material_name', self.material_name),
+                )
+        else:
+            self.add_visual_xml(link, self.name, self.visual_mesh_extension, self.material_name)
         
         # collision
         collision = SubElement(link, 'collision')

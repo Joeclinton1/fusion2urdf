@@ -10,7 +10,7 @@ from xml.etree.ElementTree import Element, SubElement
 from . import Link, Joint
 from ..utils import utils
 
-def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict, materials_dict=None, visual_mesh_extension='stl'):
+def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict, materials_dict=None, visual_mesh_extension='stl', visual_meshes=None):
     """
     Write links information into urdf "repo/file_name"
     
@@ -35,6 +35,7 @@ def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict,
     """
     with open(file_name, mode='a') as f:
         materials_dict = materials_dict or {}
+        visual_meshes = visual_meshes or {}
         # for base_link
         center_of_mass = inertial_dict['base_link']['center_of_mass']
         material_name = materials_dict.get('base_link', {}).get('name', 'silver')
@@ -43,7 +44,8 @@ def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict,
             mass=inertial_dict['base_link']['mass'],
             inertia_tensor=inertial_dict['base_link']['inertia'],
             material_name=material_name,
-            visual_mesh_extension=visual_mesh_extension)
+            visual_mesh_extension=visual_mesh_extension,
+            visual_meshes=visual_meshes.get('base_link'))
         links_xyz_dict[link.name] = link.xyz
         link.make_link_xml()
         f.write(link.link_xml)
@@ -60,7 +62,8 @@ def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict,
                 repo=repo, mass=inertial_dict[name]['mass'],\
                 inertia_tensor=inertial_dict[name]['inertia'],
                 material_name=material_name,
-                visual_mesh_extension=visual_mesh_extension)
+                visual_mesh_extension=visual_mesh_extension,
+                visual_meshes=visual_meshes.get(name))
             links_xyz_dict[link.name] = link.xyz            
             link.make_link_xml()
             f.write(link.link_xml)
@@ -189,7 +192,7 @@ def write_urdf(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_n
     write_joint_urdf(joints_dict, repo, links_xyz_dict, file_name)
     write_gazebo_endtag(file_name)
 
-def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir, export_settings=None, materials_dict=None):
+def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir, export_settings=None, materials_dict=None, visual_meshes=None):
     """
     Write a plain URDF folder for browser loaders.
 
@@ -215,7 +218,7 @@ def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, s
         )
         write_humanoid_root_urdf(file_name, export_settings, shoulder_height)
 
-    write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict, materials_dict, visual_mesh_extension='obj')
+    write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict, materials_dict, visual_mesh_extension='obj', visual_meshes=visual_meshes)
     write_joint_urdf(joints_dict, repo, links_xyz_dict, file_name)
     write_gazebo_endtag(file_name)
 

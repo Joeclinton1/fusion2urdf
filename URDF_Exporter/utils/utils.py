@@ -524,6 +524,60 @@ def _body_material(body, fallback_name):
     return None
 
 
+def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
+    """
+    Return browser visual mesh overrides for gripper children that should stay
+    separately addressable in the viewer.
+    """
+    visual_meshes = {}
+
+    for link in link_occurrences:
+        link_name = link['link_name']
+        if link_name != 'gripper':
+            continue
+
+        occurrence = link['occurrence']
+        meshes = []
+        used_names = set()
+
+        try:
+            children = occurrence.childOccurrences
+        except:
+            children = []
+
+        for child in children:
+            child_name = sanitize_name(child.name.split(':')[0])
+            component_name = sanitize_name(child.component.name)
+            combined = (child_name + ' ' + component_name).lower()
+
+            if 'pincopen' in combined:
+                mesh_name = link_name + '_pincopen'
+            elif 'camera' in combined:
+                mesh_name = link_name + '_camera'
+            else:
+                continue
+
+            base_name = mesh_name
+            suffix = 2
+            while mesh_name in used_names:
+                mesh_name = base_name + '_' + str(suffix)
+                suffix += 1
+            used_names.add(mesh_name)
+
+            meshes.append({
+                'occurrence': child,
+                'mesh_name': mesh_name,
+                'extension': visual_mesh_extension,
+                'source_occurrence_name': child.name,
+                'source_component_name': child.component.name,
+            })
+
+        if meshes:
+            visual_meshes[link_name] = meshes
+
+    return visual_meshes
+
+
 def collect_link_materials(link_occurrences):
     """
     Return one URDF material per exported top-level link.
@@ -759,7 +813,7 @@ def _set_export_option(options, name, value):
         return False
 
 
-def export_obj_links(design, save_dir, link_occurrences):
+def export_obj_links(design, save_dir, link_occurrences, visual_meshes=None):
     """
     Export one OBJ visual mesh per top-level URDF link occurrence.
 
@@ -771,16 +825,23 @@ def export_obj_links(design, save_dir, link_occurrences):
     except: pass
 
     scriptDir = save_dir + '/meshes'
+    visual_meshes = visual_meshes or {}
     for link in link_occurrences:
-        occ = link['occurrence']
-        fileName = scriptDir + "/" + link['link_name']
-        try:
-            objExportOptions = exportMgr.createOBJExportOptions(occ, fileName)
-            _set_export_option(objExportOptions, 'meshRefinement', adsk.fusion.MeshRefinementSettings.MeshRefinementLow)
-            _set_export_option(objExportOptions, 'unitType', adsk.fusion.DistanceUnits.MillimeterDistanceUnits)
-            exportMgr.execute(objExportOptions)
-        except Exception as e:
-            print('Component ' + link['occurrence_name'] + ' failed OBJ export: ' + str(e))
+        export_meshes = visual_meshes.get(link['link_name']) or [{
+            'occurrence': link['occurrence'],
+            'mesh_name': link['link_name'],
+        }]
+
+        for visual_mesh in export_meshes:
+            occ = visual_mesh['occurrence']
+            fileName = scriptDir + "/" + visual_mesh['mesh_name']
+            try:
+                objExportOptions = exportMgr.createOBJExportOptions(occ, fileName)
+                _set_export_option(objExportOptions, 'meshRefinement', adsk.fusion.MeshRefinementSettings.MeshRefinementLow)
+                _set_export_option(objExportOptions, 'unitType', adsk.fusion.DistanceUnits.MillimeterDistanceUnits)
+                exportMgr.execute(objExportOptions)
+            except Exception as e:
+                print('Component ' + link['occurrence_name'] + ' failed OBJ export: ' + str(e))
 
 
 def file_dialog(ui):     
