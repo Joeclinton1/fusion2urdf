@@ -14,9 +14,115 @@ from xml.dom import minidom
 import shutil  # Replaced distutils with shutil
 import fileinput
 import sys
+import math
 
 def sanitize_name(name):
     return re.sub('[ :()]', '_', name)
+
+
+def _settings_path():
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        settings_dir = os.path.join(appdata, 'Fusion2URDF')
+    else:
+        settings_dir = os.path.join(os.path.expanduser('~'), '.fusion2urdf')
+    try:
+        os.makedirs(settings_dir)
+    except:
+        pass
+    return os.path.join(settings_dir, 'settings.json')
+
+
+def _load_export_profile():
+    try:
+        with open(_settings_path(), mode='r') as f:
+            settings = json.load(f)
+        return _normalize_export_profile(settings.get('export_profile', 'tabletop'))
+    except:
+        return 'tabletop'
+
+
+def _save_export_profile(profile):
+    try:
+        with open(_settings_path(), mode='w') as f:
+            json.dump({'export_profile': profile}, f, indent=2)
+    except:
+        pass
+
+
+def _normalize_export_profile(value):
+    value = (value or '').strip().lower().replace('_', '-')
+    value = re.sub(r'\s+', '-', value)
+
+    aliases = {
+        'robot': 'tabletop',
+        'normal': 'tabletop',
+        'non-humanoid': 'tabletop',
+        'nonhumanoid': 'tabletop',
+        'humanoid': 'humanoid-left',
+        'left': 'humanoid-left',
+        'l': 'humanoid-left',
+        'right': 'humanoid-right',
+        'r': 'humanoid-right',
+    }
+    return aliases.get(value, value)
+
+
+def export_profile_settings(profile):
+    profile = _normalize_export_profile(profile)
+    settings = {
+        'profile': profile,
+        'is_humanoid': False,
+        'arm_side': None,
+        'root_link': 'base_link',
+        'root_rpy': [0, 0, 0],
+    }
+
+    if profile == 'humanoid-left':
+        settings.update({
+            'is_humanoid': True,
+            'arm_side': 'left',
+            'root_link': 'humanoid_root',
+            'root_rpy': [0, 0, round(math.pi / 2, 6)],
+        })
+    elif profile == 'humanoid-right':
+        settings.update({
+            'is_humanoid': True,
+            'arm_side': 'right',
+            'root_link': 'humanoid_root',
+            'root_rpy': [0, 0, round(-math.pi / 2, 6)],
+        })
+
+    return settings
+
+
+def prompt_export_settings(ui):
+    default_profile = _load_export_profile()
+    prompt = (
+        'Export profile:\n'
+        '  tabletop\n'
+        '  humanoid-left\n'
+        '  humanoid-right\n\n'
+        'Humanoid profiles add a fixed shoulder mount that rotates the whole arm.'
+    )
+
+    try:
+        value, cancelled = ui.inputBox(prompt, 'Fusion2URDF settings', default_profile)
+        if cancelled:
+            return None
+    except:
+        value = default_profile
+
+    profile = _normalize_export_profile(value)
+    if profile not in ('tabletop', 'humanoid-left', 'humanoid-right'):
+        ui.messageBox(
+            'Unknown export profile "{}". Use tabletop, humanoid-left, or humanoid-right.'.format(value),
+            'Fusion2URDF'
+        )
+        return None
+
+    _save_export_profile(profile)
+    return export_profile_settings(profile)
 
 
 def make_unique_export_dir(parent_dir, package_name):
@@ -74,6 +180,155 @@ def collect_link_occurrences(root):
         })
 
     return links
+
+
+def _iter_occurrence_tree(occurrence):
+    yield occurrence
+    try:
+        for child in occurrence.childOccurrences:
+            for nested in _iter_occurrence_tree(child):
+                yield nested
+    except:
+        pass
+
+
+def _iter_occurrence_bodies(occurrence):
+    for occ in _iter_occurrence_tree(occurrence):
+        try:
+            for body in occ.bRepBodies:
+                yield body
+        except:
+            pass
+
+
+def _color_to_rgba(color):
+    try:
+        result = color.getColor()
+        if len(result) == 5:
+            _, red, green, blue, opacity = result
+        else:
+            red, green, blue, opacity = result
+        return [
+            round(red / 255.0, 6),
+            round(green / 255.0, 6),
+            round(blue / 255.0, 6),
+            round(opacity / 255.0, 6),
+        ]
+    except:
+        pass
+
+    try:
+        return [
+            round(color.red / 255.0, 6),
+            round(color.green / 255.0, 6),
+            round(color.blue / 255.0, 6),
+            round(color.opacity / 255.0, 6),
+        ]
+    except:
+        return None
+
+
+def _rgba_from_appearance(appearance):
+    if not appearance:
+        return None
+
+    try:
+        color_property = appearance.appearanceProperties.itemById('opaque_albedo')
+        colors = color_property.values
+        if colors and len(colors) > 0:
+            return _color_to_rgba(colors[0])
+    except:
+        pass
+
+    try:
+        properties = appearance.appearanceProperties
+        for index in range(properties.count):
+            prop = properties.item(index)
+            try:
+                colors = prop.values
+                if colors and len(colors) > 0:
+                    rgba = _color_to_rgba(colors[0])
+                    if rgba:
+                        return rgba
+            except:
+                pass
+    except:
+        pass
+
+    return None
+
+
+def _appearance_name(appearance, fallback_name):
+    try:
+        if appearance and appearance.name:
+            return sanitize_name(appearance.name)
+    except:
+        pass
+    return fallback_name
+
+
+def _material_from_appearance(appearance, fallback_name):
+    rgba = _rgba_from_appearance(appearance)
+    if not rgba:
+        return None
+
+    return {
+        'name': _appearance_name(appearance, fallback_name),
+        'rgba': rgba,
+    }
+
+
+def _body_material(body, fallback_name):
+    for appearance_getter in [
+        lambda: body.appearance,
+        lambda: body.material.appearance,
+    ]:
+        try:
+            material = _material_from_appearance(appearance_getter(), fallback_name)
+            if material:
+                return material
+        except:
+            pass
+    return None
+
+
+def collect_link_materials(link_occurrences):
+    """
+    Return one URDF material per exported top-level link.
+
+    The current exporter emits one STL per link, so a link can only reference one
+    URDF material. If a link contains multiple body colors, the first body color
+    found in the occurrence tree is used.
+    """
+    materials = {}
+
+    for link in link_occurrences:
+        link_name = link['link_name']
+        fallback_name = 'material_' + link_name
+        occurrence = link['occurrence']
+        material = None
+
+        try:
+            material = _material_from_appearance(occurrence.appearance, fallback_name)
+        except:
+            pass
+
+        if not material:
+            for body in _iter_occurrence_bodies(occurrence):
+                material = _body_material(body, fallback_name)
+                if material:
+                    break
+
+        if not material:
+            material = {
+                'name': fallback_name,
+                'rgba': [0.7, 0.7, 0.7, 1.0],
+            }
+
+        material['name'] = fallback_name
+        materials[link_name] = material
+
+    return materials
 
 
 def link_name_for_occurrence(occurrence, link_occurrences):

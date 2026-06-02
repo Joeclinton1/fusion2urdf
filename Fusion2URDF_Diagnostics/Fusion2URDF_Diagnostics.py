@@ -305,6 +305,10 @@ def _has_link(link_map, link_name):
     return False
 
 
+def _edge_joint_name(parent, child):
+    return _sanitize_name(parent + '_to_' + child)
+
+
 def _build_link_map(root_occurrences):
     links = []
     used_names = set()
@@ -560,6 +564,7 @@ def _collapsed_joint_summary(joint_summary, link_map):
     if joint_type != 'revolute':
         return {
             'source_name': joint_summary.get('name'),
+            'exported_name': None,
             'owner_component_name': joint_summary.get('owner_component_name'),
             'type': joint_type,
             'child_link': child,
@@ -603,6 +608,7 @@ def _collapsed_joint_summary(joint_summary, link_map):
 
     return {
         'source_name': joint_summary.get('name'),
+        'exported_name': _edge_joint_name(parent, child) if included else None,
         'owner_component_name': joint_summary.get('owner_component_name'),
         'type': joint_type,
         'child_link': child,
@@ -741,6 +747,7 @@ def run(context):
             edge = (joint['parent_link'], joint['child_link'])
             if edge in used_edges:
                 joint['included_by_exporter'] = False
+                joint['exported_name'] = None
                 joint['skip_reason'] = 'duplicate collapsed top-level joint {} -> {}'.format(edge[0], edge[1])
                 continue
 
@@ -752,6 +759,7 @@ def run(context):
             if parent and edge not in used_edges:
                 collapsed_joints.append({
                     'source_name': 'synthetic_fixed_' + parent + '_to_gripper',
+                    'exported_name': _edge_joint_name(parent, 'gripper'),
                     'owner_component_name': None,
                     'type': 'fixed',
                     'child_link': 'gripper',

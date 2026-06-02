@@ -36,11 +36,17 @@ def run(context):
 
         root = design.rootComponent  # root component 
         link_occurrences = utils.collect_link_occurrences(root)
+        materials_dict = utils.collect_link_materials(link_occurrences)
 
         # set the names        
         robot_name = utils.sanitize_name(root.name.split()[0])
         save_dir = utils.file_dialog(ui)
         if save_dir == False:
+            ui.messageBox('Fusion2URDF was canceled', title)
+            return 0
+
+        export_settings = utils.prompt_export_settings(ui)
+        if not export_settings:
             ui.messageBox('Fusion2URDF was canceled', title)
             return 0
         
@@ -69,14 +75,14 @@ def run(context):
         
         # --------------------
         # Generate URDF
-        Write.write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir)
+        Write.write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir, export_settings, materials_dict)
 
         # Generate STL files directly from top-level link occurrences. This keeps
         # nested CAD components inside their containing robot link and avoids
         # mutating the Fusion design for export.
         utils.export_stl_links(design, save_dir, link_occurrences)
         
-        ui.messageBox(msg + '\n\n' + save_dir, title)
+        ui.messageBox(msg + '\n\nProfile: ' + export_settings['profile'] + '\n' + save_dir, title)
         
     except:
         if export_state:

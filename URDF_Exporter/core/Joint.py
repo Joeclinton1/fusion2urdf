@@ -62,6 +62,10 @@ def _has_link(link_occurrences, link_name):
     return False
 
 
+def _edge_joint_name(parent, child):
+    return utils.sanitize_name(parent + '_to_' + child)
+
+
 def _joint_xyz(joint):
     #There seem to be a problem with geometryOrOriginTwo. To calcualte the correct orogin of the generated stl files following approach was used.
     #https://forums.autodesk.com/t5/fusion-360-api-and-scripts/difference-of-geometryororiginone-and-geometryororiginonetwo/m-p/9837767
@@ -337,7 +341,7 @@ def make_joints_dict(root, msg):
         if inferred_reason:
             joint_dict['inferred_reason'] = inferred_reason
         
-        joint_name = utils.sanitize_name(joint.name)
+        joint_name = _edge_joint_name(parent, child)
         if joint_name in joints_dict:
             suffix = 2
             base_name = joint_name
@@ -350,7 +354,7 @@ def make_joints_dict(root, msg):
         parent = _last_numbered_link(link_occurrences)
         edge = (parent, 'gripper')
         if parent and edge not in used_edges:
-            joints_dict['fixed_' + parent + '_to_gripper'] = {
+            joints_dict[_edge_joint_name(parent, 'gripper')] = {
                 'type': 'fixed',
                 'axis': [0, 0, 0],
                 'upper_limit': 0.0,

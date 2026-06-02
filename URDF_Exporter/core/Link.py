@@ -11,7 +11,7 @@ from ..utils import utils
 
 class Link:
 
-    def __init__(self, name, xyz, center_of_mass, repo, mass, inertia_tensor):
+    def __init__(self, name, xyz, center_of_mass, repo, mass, inertia_tensor, material_name='silver'):
         """
         Parameters
         ----------
@@ -39,6 +39,7 @@ class Link:
         self.repo = repo
         self.mass = mass
         self.inertia_tensor = inertia_tensor
+        self.material_name = material_name
 
     def mesh_filename(self):
         if self.repo.startswith('package://') or self.repo.startswith('../') or self.repo.startswith('./'):
@@ -73,7 +74,7 @@ class Link:
         mesh_v = SubElement(geometry_v, 'mesh')
         mesh_v.attrib = {'filename':self.mesh_filename(),'scale':'0.001 0.001 0.001'}
         material = SubElement(visual, 'material')
-        material.attrib = {'name':'silver'}
+        material.attrib = {'name':self.material_name}
         
         # collision
         collision = SubElement(link, 'collision')

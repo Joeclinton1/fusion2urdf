@@ -10,7 +10,7 @@ from xml.etree.ElementTree import Element, SubElement
 from . import Link, Joint
 from ..utils import utils
 
-def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict):
+def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict, materials_dict=None):
     """
     Write links information into urdf "repo/file_name"
     
@@ -34,12 +34,15 @@ def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict)
     The origin of the coordinate of center_of_mass is the coordinate of the link
     """
     with open(file_name, mode='a') as f:
+        materials_dict = materials_dict or {}
         # for base_link
         center_of_mass = inertial_dict['base_link']['center_of_mass']
+        material_name = materials_dict.get('base_link', {}).get('name', 'silver')
         link = Link.Link(name='base_link', xyz=[0,0,0], 
             center_of_mass=center_of_mass, repo=repo,
             mass=inertial_dict['base_link']['mass'],
-            inertia_tensor=inertial_dict['base_link']['inertia'])
+            inertia_tensor=inertial_dict['base_link']['inertia'],
+            material_name=material_name)
         links_xyz_dict[link.name] = link.xyz
         link.make_link_xml()
         f.write(link.link_xml)
@@ -50,10 +53,12 @@ def write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict)
             name = joints_dict[joint]['child']
             center_of_mass = \
                 [ i-j for i, j in zip(inertial_dict[name]['center_of_mass'], joints_dict[joint]['xyz'])]
+            material_name = materials_dict.get(name, {}).get('name', 'silver')
             link = Link.Link(name=name, xyz=joints_dict[joint]['xyz'],\
                 center_of_mass=center_of_mass,\
                 repo=repo, mass=inertial_dict[name]['mass'],\
-                inertia_tensor=inertial_dict[name]['inertia'])
+                inertia_tensor=inertial_dict[name]['inertia'],
+                material_name=material_name)
             links_xyz_dict[link.name] = link.xyz            
             link.make_link_xml()
             f.write(link.link_xml)
@@ -116,6 +121,48 @@ def write_gazebo_endtag(file_name):
     """
     with open(file_name, mode='a') as f:
         f.write('</robot>\n')
+
+
+def write_humanoid_root_urdf(file_name, export_settings):
+    side = export_settings.get('arm_side') or 'arm'
+    rpy = export_settings.get('root_rpy') or [0, 0, 0]
+    rpy_text = ' '.join([str(_) for _ in rpy])
+
+    with open(file_name, mode='a') as f:
+        f.write('<link name="humanoid_root"/>\n')
+        f.write('\n')
+        f.write('<joint name="{}_shoulder_mount" type="fixed">\n'.format(side))
+        f.write('  <origin xyz="0 0 0" rpy="{}"/>\n'.format(rpy_text))
+        f.write('  <parent link="humanoid_root"/>\n')
+        f.write('  <child link="base_link"/>\n')
+        f.write('</joint>\n')
+        f.write('\n')
+
+
+def write_material_definitions(file_name, materials_dict):
+    materials = materials_dict or {}
+    written = set()
+
+    with open(file_name, mode='a') as f:
+        if not materials:
+            f.write('<material name="silver">\n')
+            f.write('  <color rgba="0.700 0.700 0.700 1.000"/>\n')
+            f.write('</material>\n')
+            f.write('\n')
+            return
+
+        for link_name in sorted(materials.keys()):
+            material = materials[link_name]
+            name = material.get('name') or ('material_' + link_name)
+            if name in written:
+                continue
+            rgba = material.get('rgba') or [0.7, 0.7, 0.7, 1.0]
+            rgba_text = ' '.join(['{:.6f}'.format(_) for _ in rgba])
+            f.write('<material name="{}">\n'.format(name))
+            f.write('  <color rgba="{}"/>\n'.format(rgba_text))
+            f.write('</material>\n')
+            f.write('\n')
+            written.add(name)
         
 
 def write_urdf(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_name, save_dir):
@@ -139,7 +186,7 @@ def write_urdf(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_n
     write_joint_urdf(joints_dict, repo, links_xyz_dict, file_name)
     write_gazebo_endtag(file_name)
 
-def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir):
+def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir, export_settings=None, materials_dict=None):
     """
     Write a plain URDF folder for browser loaders.
 
@@ -155,12 +202,13 @@ def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, s
         f.write('<?xml version="1.0" ?>\n')
         f.write('<robot name="{}">\n'.format(robot_name))
         f.write('\n')
-        f.write('<material name="silver">\n')
-        f.write('  <color rgba="0.700 0.700 0.700 1.000"/>\n')
-        f.write('</material>\n')
-        f.write('\n')
 
-    write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict)
+    write_material_definitions(file_name, materials_dict)
+
+    if export_settings and export_settings.get('is_humanoid'):
+        write_humanoid_root_urdf(file_name, export_settings)
+
+    write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict, materials_dict)
     write_joint_urdf(joints_dict, repo, links_xyz_dict, file_name)
     write_gazebo_endtag(file_name)
 
