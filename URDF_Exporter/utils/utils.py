@@ -15,6 +15,10 @@ import shutil  # Replaced distutils with shutil
 import fileinput
 import sys
 
+def sanitize_name(name):
+    return re.sub('[ :()]', '_', name)
+
+
 def make_unique_export_dir(parent_dir, package_name):
     """
     Create a new export directory without overwriting an earlier export.
@@ -33,6 +37,108 @@ def make_unique_export_dir(parent_dir, package_name):
 
     os.makedirs(candidate)
     return candidate
+
+
+def collect_link_occurrences(root):
+    """
+    Treat each visible root occurrence as one URDF link.
+
+    Nested components often represent CAD/detail structure, not robot links. A
+    root occurrence's physical properties include its nested bodies, and Fusion
+    can export the occurrence as one STL.
+    """
+    links = []
+    used_names = set()
+
+    for index, occs in enumerate(root.occurrences):
+        raw_name = occs.component.name if occs.component.name == 'base_link' else occs.name
+        link_name = sanitize_name(raw_name)
+
+        if occs.component.name == 'base_link' or link_name == 'base_link':
+            link_name = 'base_link'
+        elif index == 0:
+            link_name = 'base_link'
+
+        base_name = link_name
+        suffix = 2
+        while link_name in used_names:
+            link_name = base_name + '_' + str(suffix)
+            suffix += 1
+
+        used_names.add(link_name)
+        links.append({
+            'occurrence': occs,
+            'occurrence_name': occs.name,
+            'component_name': occs.component.name,
+            'link_name': link_name,
+        })
+
+    return links
+
+
+def link_name_for_occurrence(occurrence, link_occurrences):
+    """
+    Map a joint endpoint occurrence to its top-level URDF link name.
+    """
+    if not occurrence:
+        return None
+
+    top_name = None
+    try:
+        full_path_name = occurrence.fullPathName
+        if full_path_name:
+            top_name = full_path_name.split('+')[0]
+    except:
+        pass
+
+    if not top_name:
+        try:
+            top_name = occurrence.name
+        except:
+            return None
+
+    for link in link_occurrences:
+        if top_name == link['occurrence_name']:
+            return link['link_name']
+
+    return None
+
+
+def all_design_joints(root):
+    try:
+        design = root.parentDesign
+        components = design.allComponents
+    except:
+        try:
+            app = adsk.core.Application.get()
+            design = adsk.fusion.Design.cast(app.activeProduct)
+            components = design.allComponents
+        except:
+            components = [root]
+
+    for component in components:
+        try:
+            for joint in component.joints:
+                yield component, joint
+        except:
+            pass
+
+
+def write_export_debug(save_dir, root, link_occurrences, joints_dict, skipped_joints):
+    debug = {
+        'root_component': root.name,
+        'links': [{
+            'occurrence_name': link['occurrence_name'],
+            'component_name': link['component_name'],
+            'link_name': link['link_name'],
+        } for link in link_occurrences],
+        'joints': joints_dict,
+        'skipped_joints': skipped_joints,
+    }
+
+    file_name = os.path.join(save_dir, 'fusion2urdf_export_debug.json')
+    with open(file_name, mode='w') as f:
+        json.dump(debug, f, indent=2)
 
 
 def copy_occs(root):    
@@ -134,6 +240,28 @@ def export_stl(design, save_dir, components):
                     exportMgr.execute(stlExportOptions)
                 except:
                     print('Component ' + occ.component.name + ' has something wrong.')
+
+
+def export_stl_links(design, save_dir, link_occurrences):
+    """
+    Export one STL per top-level URDF link occurrence.
+    """
+    exportMgr = design.exportManager
+    try: os.mkdir(save_dir + '/meshes')
+    except: pass
+
+    scriptDir = save_dir + '/meshes'
+    for link in link_occurrences:
+        occ = link['occurrence']
+        fileName = scriptDir + "/" + link['link_name']
+        try:
+            stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
+            stlExportOptions.sendToPrintUtility = False
+            stlExportOptions.isBinaryFormat = True
+            stlExportOptions.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementLow
+            exportMgr.execute(stlExportOptions)
+        except Exception as e:
+            print('Component ' + link['occurrence_name'] + ' failed STL export: ' + str(e))
 
 
 def file_dialog(ui):     

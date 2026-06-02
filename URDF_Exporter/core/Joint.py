@@ -123,8 +123,10 @@ def make_joints_dict(root, msg):
     'PinSlot', 'Planner', 'Ball']  # these are the names in urdf
 
     joints_dict = {}
+    skipped_joints = []
+    link_occurrences = utils.collect_link_occurrences(root)
     
-    for joint in root.joints:
+    for owner_component, joint in utils.all_design_joints(root):
         joint_dict = {}
         joint_type = joint_type_list[joint.jointMotion.jointType]
         joint_dict['type'] = joint_type
@@ -168,12 +170,32 @@ def make_joints_dict(root, msg):
                 break
         elif joint_type == 'fixed':
             pass
-        
-        if joint.occurrenceTwo.component.name == 'base_link':
-            joint_dict['parent'] = 'base_link'
-        else:
-            joint_dict['parent'] = re.sub('[ :()]', '_', joint.occurrenceTwo.name)
-        joint_dict['child'] = re.sub('[ :()]', '_', joint.occurrenceOne.name)
+
+        parent = utils.link_name_for_occurrence(joint.occurrenceTwo, link_occurrences)
+        child = utils.link_name_for_occurrence(joint.occurrenceOne, link_occurrences)
+
+        if not parent or not child:
+            skipped_joints.append({
+                'name': joint.name,
+                'owner_component': owner_component.name,
+                'reason': 'could not map occurrenceOne/occurrenceTwo to root link occurrence',
+                'occurrence_one': joint.occurrenceOne.fullPathName if joint.occurrenceOne else None,
+                'occurrence_two': joint.occurrenceTwo.fullPathName if joint.occurrenceTwo else None,
+            })
+            continue
+
+        if parent == child:
+            skipped_joints.append({
+                'name': joint.name,
+                'owner_component': owner_component.name,
+                'reason': 'joint is internal to collapsed link ' + parent,
+                'occurrence_one': joint.occurrenceOne.fullPathName if joint.occurrenceOne else None,
+                'occurrence_two': joint.occurrenceTwo.fullPathName if joint.occurrenceTwo else None,
+            })
+            continue
+
+        joint_dict['parent'] = parent
+        joint_dict['child'] = child
         
         
         #There seem to be a problem with geometryOrOriginTwo. To calcualte the correct orogin of the generated stl files following approach was used.
@@ -227,5 +249,14 @@ def make_joints_dict(root, msg):
                 msg = joint.name + " doesn't have joint origin. Please set it and run again."
                 break
         
-        joints_dict[joint.name] = joint_dict
+        joint_name = utils.sanitize_name(joint.name)
+        if joint_name in joints_dict:
+            suffix = 2
+            base_name = joint_name
+            while joint_name in joints_dict:
+                joint_name = base_name + '_' + str(suffix)
+                suffix += 1
+        joints_dict[joint_name] = joint_dict
+
+    make_joints_dict.skipped_joints = skipped_joints
     return joints_dict, msg

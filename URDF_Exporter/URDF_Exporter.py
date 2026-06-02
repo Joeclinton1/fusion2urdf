@@ -38,6 +38,7 @@ def run(context):
 
         root = design.rootComponent  # root component 
         components = design.allComponents
+        link_occurrences = utils.collect_link_occurrences(root)
 
         # set the names        
         robot_name = root.name.split()[0]
@@ -56,6 +57,7 @@ def run(context):
         
         # Generate joints_dict. All joints are related to root. 
         joints_dict, msg = Joint.make_joints_dict(root, msg)
+        skipped_joints = getattr(Joint.make_joints_dict, 'skipped_joints', [])
         if msg != success_msg:
             ui.messageBox(msg, title)
             return 0   
@@ -72,6 +74,7 @@ def run(context):
 
         utils.write_model_snapshot(root, joints_dict, inertial_dict, save_dir)
         utils.save_viewport_image(save_dir)
+        utils.write_export_debug(save_dir, root, link_occurrences, joints_dict, skipped_joints)
         
         links_xyz_dict = {}
         
@@ -91,14 +94,10 @@ def run(context):
         utils.update_cmakelists(save_dir, package_name)
         utils.update_package_xml(save_dir, package_name)
 
-        # Generate STL files. This temporarily creates export-only components, then
-        # removes them and restores original component names so the design is not
-        # left altered by a test export.
-        export_state = utils.copy_occs(root)
-        try:
-            utils.export_stl(design, save_dir, components)
-        finally:
-            utils.restore_occs(export_state)
+        # Generate STL files directly from top-level link occurrences. This keeps
+        # nested CAD components inside their containing robot link and avoids
+        # mutating the Fusion design for export.
+        utils.export_stl_links(design, save_dir, link_occurrences)
         
         ui.messageBox(msg, title)
         
