@@ -283,6 +283,28 @@ def _normalize_parent_child(parent, child):
     return parent, child
 
 
+def _last_numbered_link(link_map):
+    last_link = None
+    last_index = None
+
+    for link in link_map:
+        index = _link_index(link.get('link_name'))
+        if index is None:
+            continue
+        if last_index is None or index > last_index:
+            last_index = index
+            last_link = link.get('link_name')
+
+    return last_link
+
+
+def _has_link(link_map, link_name):
+    for link in link_map:
+        if link.get('link_name') == link_name:
+            return True
+    return False
+
+
 def _build_link_map(root_occurrences):
     links = []
     used_names = set()
@@ -723,6 +745,30 @@ def run(context):
                 continue
 
             used_edges.add(edge)
+
+        if _has_link(link_map, 'gripper'):
+            parent = _last_numbered_link(link_map)
+            edge = (parent, 'gripper')
+            if parent and edge not in used_edges:
+                collapsed_joints.append({
+                    'source_name': 'synthetic_fixed_' + parent + '_to_gripper',
+                    'owner_component_name': None,
+                    'type': 'fixed',
+                    'child_link': 'gripper',
+                    'parent_link': parent,
+                    'included_by_exporter': True,
+                    'skip_reason': None,
+                    'inferred_reason': 'synthetic fixed joint from last numbered link to gripper',
+                    'occurrence_one_full_path': None,
+                    'occurrence_two_full_path': None,
+                    'axis': [0, 0, 0],
+                    'slide_axis': None,
+                    'geometry_or_origin_one': None,
+                    'geometry_or_origin_two': None,
+                    'rotation_limits': None,
+                    'slide_limits': None,
+                })
+                used_edges.add(edge)
 
         included_collapsed_joints = [joint for joint in collapsed_joints if joint['included_by_exporter']]
         skipped_collapsed_joints = [joint for joint in collapsed_joints if not joint['included_by_exporter']]

@@ -40,6 +40,28 @@ def _normalize_parent_child(parent, child):
     return parent, child
 
 
+def _last_numbered_link(link_occurrences):
+    last_link = None
+    last_index = None
+
+    for link in link_occurrences:
+        index = _link_index(link['link_name'])
+        if index is None:
+            continue
+        if last_index is None or index > last_index:
+            last_index = index
+            last_link = link['link_name']
+
+    return last_link
+
+
+def _has_link(link_occurrences, link_name):
+    for link in link_occurrences:
+        if link['link_name'] == link_name:
+            return True
+    return False
+
+
 def _joint_xyz(joint):
     #There seem to be a problem with geometryOrOriginTwo. To calcualte the correct orogin of the generated stl files following approach was used.
     #https://forums.autodesk.com/t5/fusion-360-api-and-scripts/difference-of-geometryororiginone-and-geometryororiginonetwo/m-p/9837767
@@ -86,7 +108,14 @@ def _joint_xyz(joint):
                 data = joint.geometryOrOriginTwo.origin.asArray()
             return [round(i / 100.0, 6) for i in data]  # converted to meter
         except:
-            return None
+            try:
+                if type(joint.geometryOrOriginOne)==adsk.fusion.JointOrigin:
+                    data = joint.geometryOrOriginOne.geometry.origin.asArray()
+                else:
+                    data = joint.geometryOrOriginOne.origin.asArray()
+                return [round(i / 100.0, 6) for i in data]  # converted to meter
+            except:
+                return None
 
 
 class Joint:
@@ -316,6 +345,22 @@ def make_joints_dict(root, msg):
                 joint_name = base_name + '_' + str(suffix)
                 suffix += 1
         joints_dict[joint_name] = joint_dict
+
+    if _has_link(link_occurrences, 'gripper'):
+        parent = _last_numbered_link(link_occurrences)
+        edge = (parent, 'gripper')
+        if parent and edge not in used_edges:
+            joints_dict['fixed_' + parent + '_to_gripper'] = {
+                'type': 'fixed',
+                'axis': [0, 0, 0],
+                'upper_limit': 0.0,
+                'lower_limit': 0.0,
+                'parent': parent,
+                'child': 'gripper',
+                'xyz': [0, 0, 0],
+                'inferred_reason': 'synthetic fixed joint from last numbered link to gripper',
+            }
+            used_edges.add(edge)
 
     make_joints_dict.skipped_joints = skipped_joints
     return joints_dict, msg

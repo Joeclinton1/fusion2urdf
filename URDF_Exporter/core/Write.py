@@ -139,6 +139,31 @@ def write_urdf(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_n
     write_joint_urdf(joints_dict, repo, links_xyz_dict, file_name)
     write_gazebo_endtag(file_name)
 
+def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir):
+    """
+    Write a plain URDF folder for browser loaders.
+
+    The URDF is saved in robot/urdf and references STL meshes with paths
+    relative to that file, matching urdf-loaders-obj's examples.
+    """
+    try: os.mkdir(save_dir + '/urdf')
+    except: pass
+
+    file_name = save_dir + '/urdf/' + robot_name + '.urdf'
+    repo = '../meshes/'
+    with open(file_name, mode='w') as f:
+        f.write('<?xml version="1.0" ?>\n')
+        f.write('<robot name="{}">\n'.format(robot_name))
+        f.write('\n')
+        f.write('<material name="silver">\n')
+        f.write('  <color rgba="0.700 0.700 0.700 1.000"/>\n')
+        f.write('</material>\n')
+        f.write('\n')
+
+    write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict)
+    write_joint_urdf(joints_dict, repo, links_xyz_dict, file_name)
+    write_gazebo_endtag(file_name)
+
 def write_materials_xacro(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_name, save_dir):
     try: os.mkdir(save_dir + '/urdf')
     except: pass  

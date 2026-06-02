@@ -2,8 +2,6 @@
 #Description-Generate URDF file from Fusion 360
 
 import adsk, adsk.core, adsk.fusion, traceback
-import os
-import sys
 from .utils import utils
 from .core import Link, Joint, Write
 
@@ -37,27 +35,22 @@ def run(context):
             return
 
         root = design.rootComponent  # root component 
-        components = design.allComponents
         link_occurrences = utils.collect_link_occurrences(root)
 
         # set the names        
-        robot_name = root.name.split()[0]
-        package_name = robot_name + '_description'
+        robot_name = utils.sanitize_name(root.name.split()[0])
         save_dir = utils.file_dialog(ui)
         if save_dir == False:
             ui.messageBox('Fusion2URDF was canceled', title)
             return 0
         
-        save_dir = utils.make_unique_export_dir(save_dir, package_name)
-
-        package_dir = os.path.abspath(os.path.dirname(__file__)) + '/package/'
+        save_dir = utils.make_unique_export_dir(save_dir, robot_name)
         
         # --------------------
         # set dictionaries
         
         # Generate joints_dict. All joints are related to root. 
         joints_dict, msg = Joint.make_joints_dict(root, msg)
-        skipped_joints = getattr(Joint.make_joints_dict, 'skipped_joints', [])
         if msg != success_msg:
             ui.messageBox(msg, title)
             return 0   
@@ -71,35 +64,19 @@ def run(context):
             msg = 'There is no base_link. Please set base_link and run again.'
             ui.messageBox(msg, title)
             return 0
-
-        utils.write_model_snapshot(root, joints_dict, inertial_dict, save_dir)
-        utils.save_viewport_image(save_dir)
-        utils.write_export_debug(save_dir, root, link_occurrences, joints_dict, skipped_joints)
         
         links_xyz_dict = {}
         
         # --------------------
         # Generate URDF
-        Write.write_urdf(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_name, save_dir)
-        Write.write_materials_xacro(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_name, save_dir)
-        Write.write_transmissions_xacro(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_name, save_dir)
-        Write.write_gazebo_xacro(joints_dict, links_xyz_dict, inertial_dict, package_name, robot_name, save_dir)
-        Write.write_display_launch(package_name, robot_name, save_dir)
-        Write.write_gazebo_launch(package_name, robot_name, save_dir)
-        Write.write_control_launch(package_name, robot_name, save_dir, joints_dict)
-        Write.write_yaml(package_name, robot_name, save_dir, joints_dict)
-        
-        # copy over package files
-        utils.copy_package(save_dir, package_dir)
-        utils.update_cmakelists(save_dir, package_name)
-        utils.update_package_xml(save_dir, package_name)
+        Write.write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir)
 
         # Generate STL files directly from top-level link occurrences. This keeps
         # nested CAD components inside their containing robot link and avoids
         # mutating the Fusion design for export.
         utils.export_stl_links(design, save_dir, link_occurrences)
         
-        ui.messageBox(msg, title)
+        ui.messageBox(msg + '\n\n' + save_dir, title)
         
     except:
         if export_state:
