@@ -11,7 +11,7 @@ from ..utils import utils
 
 class Link:
 
-    def __init__(self, name, xyz, center_of_mass, repo, mass, inertia_tensor, material_name='silver'):
+    def __init__(self, name, xyz, center_of_mass, repo, mass, inertia_tensor, material_name='silver', visual_mesh_extension='stl'):
         """
         Parameters
         ----------
@@ -40,11 +40,12 @@ class Link:
         self.mass = mass
         self.inertia_tensor = inertia_tensor
         self.material_name = material_name
+        self.visual_mesh_extension = visual_mesh_extension
 
-    def mesh_filename(self):
+    def mesh_filename(self, extension='stl'):
         if self.repo.startswith('package://') or self.repo.startswith('../') or self.repo.startswith('./'):
-            return self.repo + self.name + '.stl'
-        return 'package://' + self.repo + self.name + '.stl'
+            return self.repo + self.name + '.' + extension
+        return 'package://' + self.repo + self.name + '.' + extension
         
     def make_link_xml(self):
         """
@@ -72,9 +73,10 @@ class Link:
         origin_v.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]), 'rpy':'0 0 0'}
         geometry_v = SubElement(visual, 'geometry')
         mesh_v = SubElement(geometry_v, 'mesh')
-        mesh_v.attrib = {'filename':self.mesh_filename(),'scale':'0.001 0.001 0.001'}
-        material = SubElement(visual, 'material')
-        material.attrib = {'name':self.material_name}
+        mesh_v.attrib = {'filename':self.mesh_filename(self.visual_mesh_extension),'scale':'0.001 0.001 0.001'}
+        if self.visual_mesh_extension.lower() == 'stl':
+            material = SubElement(visual, 'material')
+            material.attrib = {'name':self.material_name}
         
         # collision
         collision = SubElement(link, 'collision')
@@ -82,7 +84,7 @@ class Link:
         origin_c.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]), 'rpy':'0 0 0'}
         geometry_c = SubElement(collision, 'geometry')
         mesh_c = SubElement(geometry_c, 'mesh')
-        mesh_c.attrib = {'filename':self.mesh_filename(),'scale':'0.001 0.001 0.001'}
+        mesh_c.attrib = {'filename':self.mesh_filename('stl'),'scale':'0.001 0.001 0.001'}
 
         # print("\n".join(utils.prettify(link).split("\n")[1:]))
         self.link_xml = "\n".join(utils.prettify(link).split("\n")[1:])

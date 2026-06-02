@@ -751,6 +751,38 @@ def export_stl_links(design, save_dir, link_occurrences):
             print('Component ' + link['occurrence_name'] + ' failed STL export: ' + str(e))
 
 
+def _set_export_option(options, name, value):
+    try:
+        setattr(options, name, value)
+        return True
+    except:
+        return False
+
+
+def export_obj_links(design, save_dir, link_occurrences):
+    """
+    Export one OBJ visual mesh per top-level URDF link occurrence.
+
+    OBJ keeps Fusion appearance colors through its companion MTL file while the
+    existing STL export remains the collision mesh.
+    """
+    exportMgr = design.exportManager
+    try: os.mkdir(save_dir + '/meshes')
+    except: pass
+
+    scriptDir = save_dir + '/meshes'
+    for link in link_occurrences:
+        occ = link['occurrence']
+        fileName = scriptDir + "/" + link['link_name']
+        try:
+            objExportOptions = exportMgr.createOBJExportOptions(occ, fileName)
+            _set_export_option(objExportOptions, 'meshRefinement', adsk.fusion.MeshRefinementSettings.MeshRefinementLow)
+            _set_export_option(objExportOptions, 'unitType', adsk.fusion.DistanceUnits.MillimeterDistanceUnits)
+            exportMgr.execute(objExportOptions)
+        except Exception as e:
+            print('Component ' + link['occurrence_name'] + ' failed OBJ export: ' + str(e))
+
+
 def file_dialog(ui):     
     """
     display the dialog to save the file

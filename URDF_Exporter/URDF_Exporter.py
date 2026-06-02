@@ -81,6 +81,7 @@ def run(context):
         # nested CAD components inside their containing robot link and avoids
         # mutating the Fusion design for export.
         utils.export_stl_links(design, save_dir, link_occurrences)
+        utils.export_obj_links(design, save_dir, link_occurrences)
         
         ui.messageBox(msg + '\n\nProfile: ' + export_settings['profile'] + '\n' + save_dir, title)
         
