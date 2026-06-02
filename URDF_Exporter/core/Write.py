@@ -108,7 +108,8 @@ to swap component1<=>component2"
                 
             joint = Joint.Joint(name=j, joint_type = joint_type, xyz=xyz, \
             axis=joints_dict[j]['axis'], parent=parent, child=child, \
-            upper_limit=upper_limit, lower_limit=lower_limit)
+            upper_limit=upper_limit, lower_limit=lower_limit,
+            rpy=joints_dict[j].get('rpy'))
             joint.make_joint_xml()
             joint.make_transmission_xml()
             f.write(joint.joint_xml)

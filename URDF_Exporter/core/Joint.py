@@ -153,7 +153,7 @@ def _joint_xyz(joint):
 
 
 class Joint:
-    def __init__(self, name, xyz, axis, parent, child, joint_type, upper_limit, lower_limit):
+    def __init__(self, name, xyz, axis, parent, child, joint_type, upper_limit, lower_limit, rpy=None):
         """
         Attributes
         ----------
@@ -184,6 +184,7 @@ class Joint:
         self.axis = axis  # for 'revolute' and 'continuous'
         self.upper_limit = upper_limit  # for 'revolute' and 'prismatic'
         self.lower_limit = lower_limit  # for 'revolute' and 'prismatic'
+        self.rpy = rpy or [0, 0, 0]
         
     def make_joint_xml(self):
         """
@@ -193,7 +194,10 @@ class Joint:
         joint.attrib = {'name':self.name, 'type':self.type}
         
         origin = SubElement(joint, 'origin')
-        origin.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]), 'rpy':'0 0 0'}
+        origin.attrib = {
+            'xyz':' '.join([str(_) for _ in self.xyz]),
+            'rpy':' '.join([str(_) for _ in self.rpy]),
+        }
         parent = SubElement(joint, 'parent')
         parent.attrib = {'link':self.parent}
         child = SubElement(joint, 'child')
@@ -381,6 +385,7 @@ def make_joints_dict(root, msg, export_settings=None):
 
         if child == 'gripper':
             xyz = _export_origin_for_link(parent, joints_dict)
+            joint_dict['rpy'] = utils.gripper_link_rpy(link_occurrences)
         else:
             xyz = _joint_xyz(joint)
         if xyz is None:
@@ -412,6 +417,7 @@ def make_joints_dict(root, msg, export_settings=None):
                 'parent': parent,
                 'child': 'gripper',
                 'xyz': _export_origin_for_link(parent, joints_dict) or [0, 0, 0],
+                'rpy': utils.gripper_link_rpy(link_occurrences),
                 'inferred_reason': 'synthetic fixed joint from last numbered link to gripper',
             }
             used_edges.add(edge)

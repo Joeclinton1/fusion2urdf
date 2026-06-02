@@ -545,6 +545,9 @@ def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
         except:
             children = []
 
+        pincopen_child = _find_named_child(children, 'pincopen')
+        pincopen_matrix = _matrix_array(pincopen_child) if pincopen_child else None
+
         for child in children:
             child_name = sanitize_name(child.name.split(':')[0])
             component_name = sanitize_name(child.component.name)
@@ -552,8 +555,13 @@ def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
 
             if 'pincopen' in combined:
                 mesh_name = link_name + '_pincopen'
+                origin_xyz = [0, 0, 0]
+                origin_rpy = [0, 0, 0]
             elif 'camera' in combined:
                 mesh_name = link_name + '_camera'
+                relative = _relative_matrix(pincopen_matrix, _matrix_array(child)) if pincopen_matrix else None
+                origin_xyz = _matrix_translation_m(relative) if relative else [0, 0, 0]
+                origin_rpy = _matrix_rpy(relative) if relative else [0, 0, 0]
             else:
                 continue
 
@@ -568,8 +576,8 @@ def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
                 'occurrence': child,
                 'mesh_name': mesh_name,
                 'extension': visual_mesh_extension,
-                'origin_xyz': [0, 0, 0],
-                'origin_rpy': [0, 0, 0],
+                'origin_xyz': origin_xyz,
+                'origin_rpy': origin_rpy,
                 'source_occurrence_name': child.name,
                 'source_component_name': child.component.name,
             })
@@ -588,6 +596,110 @@ def _matrix_array(occurrence):
             return [float(_) for _ in occurrence.transform.asArray()]
         except:
             return None
+
+
+def _find_named_child(children, keyword):
+    keyword = keyword.lower()
+    for child in children:
+        try:
+            combined = (child.name + ' ' + child.component.name).lower()
+        except:
+            combined = ''
+        if keyword in combined:
+            return child
+    return None
+
+
+def _rotation_transpose(matrix):
+    return [
+        matrix[0], matrix[4], matrix[8],
+        matrix[1], matrix[5], matrix[9],
+        matrix[2], matrix[6], matrix[10],
+    ]
+
+
+def _mat3_mul_vec3(mat, vec):
+    return [
+        mat[0] * vec[0] + mat[1] * vec[1] + mat[2] * vec[2],
+        mat[3] * vec[0] + mat[4] * vec[1] + mat[5] * vec[2],
+        mat[6] * vec[0] + mat[7] * vec[1] + mat[8] * vec[2],
+    ]
+
+
+def _mat3_mul(a, b):
+    return [
+        a[0] * b[0] + a[1] * b[3] + a[2] * b[6],
+        a[0] * b[1] + a[1] * b[4] + a[2] * b[7],
+        a[0] * b[2] + a[1] * b[5] + a[2] * b[8],
+        a[3] * b[0] + a[4] * b[3] + a[5] * b[6],
+        a[3] * b[1] + a[4] * b[4] + a[5] * b[7],
+        a[3] * b[2] + a[4] * b[5] + a[5] * b[8],
+        a[6] * b[0] + a[7] * b[3] + a[8] * b[6],
+        a[6] * b[1] + a[7] * b[4] + a[8] * b[7],
+        a[6] * b[2] + a[7] * b[5] + a[8] * b[8],
+    ]
+
+
+def _relative_matrix(parent, child):
+    if not parent or not child:
+        return None
+
+    parent_rot_inv = _rotation_transpose(parent)
+    child_rot = [
+        child[0], child[1], child[2],
+        child[4], child[5], child[6],
+        child[8], child[9], child[10],
+    ]
+    rel_rot = _mat3_mul(parent_rot_inv, child_rot)
+    rel_translation = _mat3_mul_vec3(parent_rot_inv, [
+        child[3] - parent[3],
+        child[7] - parent[7],
+        child[11] - parent[11],
+    ])
+    return [
+        rel_rot[0], rel_rot[1], rel_rot[2], rel_translation[0],
+        rel_rot[3], rel_rot[4], rel_rot[5], rel_translation[1],
+        rel_rot[6], rel_rot[7], rel_rot[8], rel_translation[2],
+        0, 0, 0, 1,
+    ]
+
+
+def _matrix_translation_m(matrix):
+    if not matrix:
+        return [0, 0, 0]
+    return [round(matrix[3] / 100.0, 6), round(matrix[7] / 100.0, 6), round(matrix[11] / 100.0, 6)]
+
+
+def _matrix_rpy(matrix):
+    if not matrix:
+        return [0, 0, 0]
+
+    r00, r01 = matrix[0], matrix[1]
+    r10 = matrix[4]
+    r20, r21, r22 = matrix[8], matrix[9], matrix[10]
+
+    pitch = math.atan2(-r20, math.sqrt(r00 * r00 + r10 * r10))
+    if abs(math.cos(pitch)) > 1e-6:
+        roll = math.atan2(r21, r22)
+        yaw = math.atan2(r10, r00)
+    else:
+        roll = 0.0
+        yaw = math.atan2(-r01, matrix[5])
+
+    return [round(roll, 6), round(pitch, 6), round(yaw, 6)]
+
+
+def gripper_link_rpy(link_occurrences):
+    for link in link_occurrences:
+        if link['link_name'] != 'gripper':
+            continue
+        try:
+            children = link['occurrence'].childOccurrences
+        except:
+            return [0, 0, 0]
+        pincopen = _find_named_child(children, 'pincopen')
+        return _matrix_rpy(_matrix_array(pincopen))
+    return [0, 0, 0]
 
 
 def write_gripper_visual_debug(save_dir, visual_meshes):
