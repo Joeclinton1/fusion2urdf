@@ -568,8 +568,6 @@ def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
                 'occurrence': child,
                 'mesh_name': mesh_name,
                 'extension': visual_mesh_extension,
-                'origin_xyz': _relative_translation_m(occurrence, child),
-                'origin_rpy': [0, 0, 0],
                 'source_occurrence_name': child.name,
                 'source_component_name': child.component.name,
             })
@@ -578,26 +576,6 @@ def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
             visual_meshes[link_name] = meshes
 
     return visual_meshes
-
-
-def _occurrence_translation_m(occurrence):
-    try:
-        arr = occurrence.transform2.asArray()
-    except:
-        try:
-            arr = occurrence.transform.asArray()
-        except:
-            return [0, 0, 0]
-
-    if len(arr) < 12:
-        return [0, 0, 0]
-    return [arr[3] / 100.0, arr[7] / 100.0, arr[11] / 100.0]
-
-
-def _relative_translation_m(parent_occurrence, child_occurrence):
-    parent = _occurrence_translation_m(parent_occurrence)
-    child = _occurrence_translation_m(child_occurrence)
-    return [round(c - p, 6) for p, c in zip(parent, child)]
 
 
 def collect_link_materials(link_occurrences):
