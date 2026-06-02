@@ -251,6 +251,38 @@ def _top_occurrence_name(full_path_name):
     return full_path_name.split('+')[0]
 
 
+def _link_index(link_name):
+    if link_name == 'base_link':
+        return 0
+
+    if not link_name or not link_name.startswith('link'):
+        return None
+
+    try:
+        return int(link_name[4:])
+    except:
+        return None
+
+
+def _previous_link_name(link_name):
+    index = _link_index(link_name)
+    if index is None or index <= 0:
+        return None
+    if index == 1:
+        return 'base_link'
+    return 'link' + str(index - 1)
+
+
+def _normalize_parent_child(parent, child):
+    parent_index = _link_index(parent)
+    child_index = _link_index(child)
+
+    if parent_index is not None and child_index is not None and parent_index > child_index:
+        return child, parent
+
+    return parent, child
+
+
 def _build_link_map(root_occurrences):
     links = []
     used_names = set()
@@ -499,7 +531,46 @@ def _collapsed_joint_summary(joint_summary, link_map):
     child = _link_for_full_path(occurrence_one_path, link_map)
     parent = _link_for_full_path(occurrence_two_path, link_map)
     reason = None
+    inferred_reason = None
     included = True
+    joint_type = joint_summary.get('joint_motion', {}).get('joint_type_name') if joint_summary.get('joint_motion') else None
+
+    if joint_type != 'revolute':
+        return {
+            'source_name': joint_summary.get('name'),
+            'owner_component_name': joint_summary.get('owner_component_name'),
+            'type': joint_type,
+            'child_link': child,
+            'parent_link': parent,
+            'included_by_exporter': False,
+            'skip_reason': 'ignored non-revolute joint',
+            'inferred_reason': None,
+            'occurrence_one_full_path': occurrence_one_path,
+            'occurrence_two_full_path': occurrence_two_path,
+            'axis': joint_summary.get('joint_motion', {}).get('rotation_axis_vector') if joint_summary.get('joint_motion') else None,
+            'slide_axis': joint_summary.get('joint_motion', {}).get('slide_direction_vector') if joint_summary.get('joint_motion') else None,
+            'geometry_or_origin_one': joint_summary.get('geometry_or_origin_one'),
+            'geometry_or_origin_two': joint_summary.get('geometry_or_origin_two'),
+            'rotation_limits': joint_summary.get('joint_motion', {}).get('rotation_limits') if joint_summary.get('joint_motion') else None,
+            'slide_limits': joint_summary.get('joint_motion', {}).get('slide_limits') if joint_summary.get('joint_motion') else None,
+        }
+
+    if not parent and child:
+        inferred_parent = _previous_link_name(child)
+        if inferred_parent:
+            parent = inferred_parent
+            inferred_reason = 'inferred parent from numbered child link'
+
+    if parent == child:
+        owner_link = _sanitize_name(joint_summary.get('owner_component_name'))
+        if owner_link == child:
+            inferred_parent = _previous_link_name(child)
+            if inferred_parent:
+                parent = inferred_parent
+                inferred_reason = 'inferred parent from internal numbered-link revolute'
+
+    if parent and child:
+        parent, child = _normalize_parent_child(parent, child)
 
     if not child or not parent:
         included = False
@@ -511,11 +582,12 @@ def _collapsed_joint_summary(joint_summary, link_map):
     return {
         'source_name': joint_summary.get('name'),
         'owner_component_name': joint_summary.get('owner_component_name'),
-        'type': joint_summary.get('joint_motion', {}).get('joint_type_name') if joint_summary.get('joint_motion') else None,
+        'type': joint_type,
         'child_link': child,
         'parent_link': parent,
         'included_by_exporter': included,
         'skip_reason': reason,
+        'inferred_reason': inferred_reason,
         'occurrence_one_full_path': occurrence_one_path,
         'occurrence_two_full_path': occurrence_two_path,
         'axis': joint_summary.get('joint_motion', {}).get('rotation_axis_vector') if joint_summary.get('joint_motion') else None,
@@ -639,6 +711,19 @@ def run(context):
         joints, as_built_joints = _all_joints(design)
         link_map = _build_link_map([dict((k, v) for k, v in node.items() if k != 'children') for node in occurrence_tree])
         collapsed_joints = [_collapsed_joint_summary(joint, link_map) for joint in joints]
+        used_edges = set()
+        for joint in collapsed_joints:
+            if not joint['included_by_exporter']:
+                continue
+
+            edge = (joint['parent_link'], joint['child_link'])
+            if edge in used_edges:
+                joint['included_by_exporter'] = False
+                joint['skip_reason'] = 'duplicate collapsed top-level joint {} -> {}'.format(edge[0], edge[1])
+                continue
+
+            used_edges.add(edge)
+
         included_collapsed_joints = [joint for joint in collapsed_joints if joint['included_by_exporter']]
         skipped_collapsed_joints = [joint for joint in collapsed_joints if not joint['included_by_exporter']]
 

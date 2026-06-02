@@ -9,6 +9,86 @@ import adsk, re
 from xml.etree.ElementTree import Element, SubElement
 from ..utils import utils
 
+
+def _link_index(link_name):
+    if link_name == 'base_link':
+        return 0
+
+    match = re.match(r'^link(\d+)$', link_name or '')
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def _previous_link_name(link_name):
+    index = _link_index(link_name)
+    if index is None or index <= 0:
+        return None
+    if index == 1:
+        return 'base_link'
+    return 'link' + str(index - 1)
+
+
+def _normalize_parent_child(parent, child):
+    parent_index = _link_index(parent)
+    child_index = _link_index(child)
+
+    if parent_index is not None and child_index is not None and parent_index > child_index:
+        return child, parent
+
+    return parent, child
+
+
+def _joint_xyz(joint):
+    #There seem to be a problem with geometryOrOriginTwo. To calcualte the correct orogin of the generated stl files following approach was used.
+    #https://forums.autodesk.com/t5/fusion-360-api-and-scripts/difference-of-geometryororiginone-and-geometryororiginonetwo/m-p/9837767
+    #Thanks to Masaki Yamamoto!
+
+    # Coordinate transformation by matrix
+    # M: 4x4 transformation matrix
+    # a: 3D vector
+    def trans(M, a):
+        ex = [M[0],M[4],M[8]]
+        ey = [M[1],M[5],M[9]]
+        ez = [M[2],M[6],M[10]]
+        oo = [M[3],M[7],M[11]]
+        b = [0, 0, 0]
+        for i in range(3):
+            b[i] = a[0]*ex[i]+a[1]*ey[i]+a[2]*ez[i]+oo[i]
+        return(b)
+
+    # Returns True if two arrays are element-wise equal within a tolerance
+    def allclose(v1, v2, tol=1e-6):
+        return( max([abs(a-b) for a,b in zip(v1, v2)]) < tol )
+
+    try:
+        xyz_from_one_to_joint = joint.geometryOrOriginOne.origin.asArray() # Relative Joint pos
+        xyz_from_two_to_joint = joint.geometryOrOriginTwo.origin.asArray() # Relative Joint pos
+        xyz_of_one            = joint.occurrenceOne.transform.translation.asArray() # Link origin
+        M_two = joint.occurrenceTwo.transform.asArray() # Matrix as a 16 element array.
+
+        # Compose joint position
+        case1 = allclose(xyz_from_two_to_joint, xyz_from_one_to_joint)
+        case2 = allclose(xyz_from_two_to_joint, xyz_of_one)
+        if case1 or case2:
+            xyz_of_joint = xyz_from_two_to_joint
+        else:
+            xyz_of_joint = trans(M_two, xyz_from_two_to_joint)
+
+        return [round(i / 100.0, 6) for i in xyz_of_joint]  # converted to meter
+
+    except:
+        try:
+            if type(joint.geometryOrOriginTwo)==adsk.fusion.JointOrigin:
+                data = joint.geometryOrOriginTwo.geometry.origin.asArray()
+            else:
+                data = joint.geometryOrOriginTwo.origin.asArray()
+            return [round(i / 100.0, 6) for i in data]  # converted to meter
+        except:
+            return None
+
+
 class Joint:
     def __init__(self, name, xyz, axis, parent, child, joint_type, upper_limit, lower_limit):
         """
@@ -125,10 +205,21 @@ def make_joints_dict(root, msg):
     joints_dict = {}
     skipped_joints = []
     link_occurrences = utils.collect_link_occurrences(root)
+    used_edges = set()
     
     for owner_component, joint in utils.all_design_joints(root):
         joint_dict = {}
         joint_type = joint_type_list[joint.jointMotion.jointType]
+        if joint_type != 'revolute':
+            skipped_joints.append({
+                'name': joint.name,
+                'owner_component': owner_component.name,
+                'reason': 'ignored non-revolute joint type ' + joint_type,
+                'occurrence_one': joint.occurrenceOne.fullPathName if joint.occurrenceOne else None,
+                'occurrence_two': joint.occurrenceTwo.fullPathName if joint.occurrenceTwo else None,
+            })
+            continue
+
         joint_dict['type'] = joint_type
         
         # swhich by the type of the joint
@@ -153,26 +244,26 @@ def make_joints_dict(root, msg):
                 break
             else:  # if there is no angle limit
                 joint_dict['type'] = 'continuous'
-                
-        elif joint_type == 'prismatic':
-            joint_dict['axis'] = [round(i, 6) for i in \
-                joint.jointMotion.slideDirectionVector.asArray()]  # Also normalized
-            max_enabled = joint.jointMotion.slideLimits.isMaximumValueEnabled
-            min_enabled = joint.jointMotion.slideLimits.isMinimumValueEnabled            
-            if max_enabled and min_enabled:  
-                joint_dict['upper_limit'] = round(joint.jointMotion.slideLimits.maximumValue/100, 6)
-                joint_dict['lower_limit'] = round(joint.jointMotion.slideLimits.minimumValue/100, 6)
-            elif max_enabled and not min_enabled:
-                msg = joint.name + 'is not set its lower limit. Please set it and try again.'
-                break
-            elif not max_enabled and min_enabled:
-                msg = joint.name + 'is not set its upper limit. Please set it and try again.'
-                break
-        elif joint_type == 'fixed':
-            pass
 
         parent = utils.link_name_for_occurrence(joint.occurrenceTwo, link_occurrences)
         child = utils.link_name_for_occurrence(joint.occurrenceOne, link_occurrences)
+        inferred_reason = None
+
+        if not parent and child:
+            parent = _previous_link_name(child)
+            if parent:
+                inferred_reason = 'inferred parent from numbered child link'
+
+        if parent == child:
+            owner_link = utils.sanitize_name(owner_component.name)
+            if owner_link == child:
+                inferred_parent = _previous_link_name(child)
+                if inferred_parent:
+                    parent = inferred_parent
+                    inferred_reason = 'inferred parent from internal numbered-link revolute'
+
+        if parent and child:
+            parent, child = _normalize_parent_child(parent, child)
 
         if not parent or not child:
             skipped_joints.append({
@@ -194,60 +285,28 @@ def make_joints_dict(root, msg):
             })
             continue
 
+        edge = (parent, child)
+        if edge in used_edges:
+            skipped_joints.append({
+                'name': joint.name,
+                'owner_component': owner_component.name,
+                'reason': 'duplicate collapsed top-level joint ' + parent + ' -> ' + child,
+                'occurrence_one': joint.occurrenceOne.fullPathName if joint.occurrenceOne else None,
+                'occurrence_two': joint.occurrenceTwo.fullPathName if joint.occurrenceTwo else None,
+            })
+            continue
+        used_edges.add(edge)
+
         joint_dict['parent'] = parent
         joint_dict['child'] = child
-        
-        
-        #There seem to be a problem with geometryOrOriginTwo. To calcualte the correct orogin of the generated stl files following approach was used.
-        #https://forums.autodesk.com/t5/fusion-360-api-and-scripts/difference-of-geometryororiginone-and-geometryororiginonetwo/m-p/9837767
-        #Thanks to Masaki Yamamoto!
-        
-        # Coordinate transformation by matrix
-        # M: 4x4 transformation matrix
-        # a: 3D vector
-        def trans(M, a):
-            ex = [M[0],M[4],M[8]]
-            ey = [M[1],M[5],M[9]]
-            ez = [M[2],M[6],M[10]]
-            oo = [M[3],M[7],M[11]]
-            b = [0, 0, 0]
-            for i in range(3):
-                b[i] = a[0]*ex[i]+a[1]*ey[i]+a[2]*ez[i]+oo[i]
-            return(b)
 
-
-        # Returns True if two arrays are element-wise equal within a tolerance
-        def allclose(v1, v2, tol=1e-6):
-            return( max([abs(a-b) for a,b in zip(v1, v2)]) < tol )
-
-        try:
-            xyz_from_one_to_joint = joint.geometryOrOriginOne.origin.asArray() # Relative Joint pos
-            xyz_from_two_to_joint = joint.geometryOrOriginTwo.origin.asArray() # Relative Joint pos
-            xyz_of_one            = joint.occurrenceOne.transform.translation.asArray() # Link origin
-            xyz_of_two            = joint.occurrenceTwo.transform.translation.asArray() # Link origin
-            M_two = joint.occurrenceTwo.transform.asArray() # Matrix as a 16 element array.
-
-        # Compose joint position
-            case1 = allclose(xyz_from_two_to_joint, xyz_from_one_to_joint)
-            case2 = allclose(xyz_from_two_to_joint, xyz_of_one)
-            if case1 or case2:
-                xyz_of_joint = xyz_from_two_to_joint
-            else:
-                xyz_of_joint = trans(M_two, xyz_from_two_to_joint)
-
-
-            joint_dict['xyz'] = [round(i / 100.0, 6) for i in xyz_of_joint]  # converted to meter
-
-        except:
-            try:
-                if type(joint.geometryOrOriginTwo)==adsk.fusion.JointOrigin:
-                    data = joint.geometryOrOriginTwo.geometry.origin.asArray()
-                else:
-                    data = joint.geometryOrOriginTwo.origin.asArray()
-                joint_dict['xyz'] = [round(i / 100.0, 6) for i in data]  # converted to meter
-            except:
-                msg = joint.name + " doesn't have joint origin. Please set it and run again."
-                break
+        xyz = _joint_xyz(joint)
+        if xyz is None:
+            msg = joint.name + " doesn't have joint origin. Please set it and run again."
+            break
+        joint_dict['xyz'] = xyz
+        if inferred_reason:
+            joint_dict['inferred_reason'] = inferred_reason
         
         joint_name = utils.sanitize_name(joint.name)
         if joint_name in joints_dict:
