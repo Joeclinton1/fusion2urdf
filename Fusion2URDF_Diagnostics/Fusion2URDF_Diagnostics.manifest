@@ -1,0 +1,10 @@
+{
+	"autodeskProduct":	"Fusion360",
+	"type":	"script",
+	"author":	"Joeclinton1 / Codex",
+	"description":	{
+		"":	"Write a read-only Fusion2URDF diagnostic dump"
+	},
+	"supportedOS":	"windows|mac",
+	"editEnabled":	true
+}
