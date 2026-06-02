@@ -40,6 +40,12 @@ def _normalize_parent_child(parent, child):
     return parent, child
 
 
+def _is_adjacent_numbered_edge(parent, child):
+    parent_index = _link_index(parent)
+    child_index = _link_index(child)
+    return parent_index is not None and child_index is not None and child_index == parent_index + 1
+
+
 def _last_numbered_link(link_occurrences):
     last_link = None
     last_index = None
@@ -282,19 +288,6 @@ def make_joints_dict(root, msg):
         child = utils.link_name_for_occurrence(joint.occurrenceOne, link_occurrences)
         inferred_reason = None
 
-        if not parent and child:
-            parent = _previous_link_name(child)
-            if parent:
-                inferred_reason = 'inferred parent from numbered child link'
-
-        if parent == child:
-            owner_link = utils.sanitize_name(owner_component.name)
-            if owner_link == child:
-                inferred_parent = _previous_link_name(child)
-                if inferred_parent:
-                    parent = inferred_parent
-                    inferred_reason = 'inferred parent from internal numbered-link revolute'
-
         if parent and child:
             parent, child = _normalize_parent_child(parent, child)
 
@@ -313,6 +306,16 @@ def make_joints_dict(root, msg):
                 'name': joint.name,
                 'owner_component': owner_component.name,
                 'reason': 'joint is internal to collapsed link ' + parent,
+                'occurrence_one': joint.occurrenceOne.fullPathName if joint.occurrenceOne else None,
+                'occurrence_two': joint.occurrenceTwo.fullPathName if joint.occurrenceTwo else None,
+            })
+            continue
+
+        if not _is_adjacent_numbered_edge(parent, child):
+            skipped_joints.append({
+                'name': joint.name,
+                'owner_component': owner_component.name,
+                'reason': 'joint endpoints are not adjacent exported links ' + parent + ' -> ' + child,
                 'occurrence_one': joint.occurrenceOne.fullPathName if joint.occurrenceOne else None,
                 'occurrence_two': joint.occurrenceTwo.fullPathName if joint.occurrenceTwo else None,
             })

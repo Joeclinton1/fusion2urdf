@@ -283,6 +283,12 @@ def _normalize_parent_child(parent, child):
     return parent, child
 
 
+def _is_adjacent_numbered_edge(parent, child):
+    parent_index = _link_index(parent)
+    child_index = _link_index(child)
+    return parent_index is not None and child_index is not None and child_index == parent_index + 1
+
+
 def _last_numbered_link(link_map):
     last_link = None
     last_index = None
@@ -582,20 +588,6 @@ def _collapsed_joint_summary(joint_summary, link_map):
             'slide_limits': joint_summary.get('joint_motion', {}).get('slide_limits') if joint_summary.get('joint_motion') else None,
         }
 
-    if not parent and child:
-        inferred_parent = _previous_link_name(child)
-        if inferred_parent:
-            parent = inferred_parent
-            inferred_reason = 'inferred parent from numbered child link'
-
-    if parent == child:
-        owner_link = _sanitize_name(joint_summary.get('owner_component_name'))
-        if owner_link == child:
-            inferred_parent = _previous_link_name(child)
-            if inferred_parent:
-                parent = inferred_parent
-                inferred_reason = 'inferred parent from internal numbered-link revolute'
-
     if parent and child:
         parent, child = _normalize_parent_child(parent, child)
 
@@ -605,6 +597,9 @@ def _collapsed_joint_summary(joint_summary, link_map):
     elif child == parent:
         included = False
         reason = 'internal_to_collapsed_link'
+    elif not _is_adjacent_numbered_edge(parent, child):
+        included = False
+        reason = 'not_adjacent_exported_link_endpoints'
 
     return {
         'source_name': joint_summary.get('name'),
