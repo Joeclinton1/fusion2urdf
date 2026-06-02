@@ -83,6 +83,7 @@ def run(context):
         # mutating the Fusion design for export.
         utils.export_stl_links(design, save_dir, link_occurrences)
         utils.export_obj_links(design, save_dir, link_occurrences, visual_meshes)
+        utils.write_gripper_visual_debug(save_dir, visual_meshes)
         
         ui.messageBox(msg + '\n\nProfile: ' + export_settings['profile'] + '\n' + save_dir, title)
         

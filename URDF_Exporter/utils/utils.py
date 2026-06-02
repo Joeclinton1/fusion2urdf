@@ -578,6 +578,31 @@ def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
     return visual_meshes
 
 
+def _matrix_array(occurrence):
+    try:
+        return [float(_) for _ in occurrence.transform2.asArray()]
+    except:
+        try:
+            return [float(_) for _ in occurrence.transform.asArray()]
+        except:
+            return None
+
+
+def write_gripper_visual_debug(save_dir, visual_meshes):
+    debug = {}
+    for link_name, meshes in (visual_meshes or {}).items():
+        debug[link_name] = []
+        for mesh in meshes:
+            occurrence = mesh.get('occurrence')
+            data = dict((key, value) for key, value in mesh.items() if key != 'occurrence')
+            data['transform_cm'] = _matrix_array(occurrence)
+            debug[link_name].append(data)
+
+    file_name = os.path.join(save_dir, 'gripper_visual_debug.json')
+    with open(file_name, mode='w') as f:
+        json.dump(debug, f, indent=2)
+
+
 def collect_link_materials(link_occurrences):
     """
     Return one URDF material per exported top-level link.
