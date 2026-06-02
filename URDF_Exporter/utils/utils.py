@@ -568,6 +568,8 @@ def gripper_visual_meshes(link_occurrences, visual_mesh_extension='obj'):
                 'occurrence': child,
                 'mesh_name': mesh_name,
                 'extension': visual_mesh_extension,
+                'origin_xyz': [0, 0, 0],
+                'origin_rpy': [0, 0, 0],
                 'source_occurrence_name': child.name,
                 'source_component_name': child.component.name,
             })
