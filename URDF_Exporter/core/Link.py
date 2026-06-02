@@ -53,10 +53,13 @@ class Link:
             return self.repo + mesh_name + '.' + extension
         return 'package://' + self.repo + mesh_name + '.' + extension
 
-    def add_visual_xml(self, link, mesh_name, extension, material_name=None):
+    def add_visual_xml(self, link, mesh_name, extension, material_name=None, origin_xyz=None, origin_rpy=None):
         visual = SubElement(link, 'visual')
         origin_v = SubElement(visual, 'origin')
-        origin_v.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]), 'rpy':'0 0 0'}
+        origin_v.attrib = {
+            'xyz':' '.join([str(_) for _ in (origin_xyz or self.xyz)]),
+            'rpy':' '.join([str(_) for _ in (origin_rpy or [0, 0, 0])]),
+        }
         geometry_v = SubElement(visual, 'geometry')
         mesh_v = SubElement(geometry_v, 'mesh')
         mesh_v.attrib = {'filename':self.visual_mesh_filename(mesh_name, extension),'scale':'0.001 0.001 0.001'}
@@ -92,6 +95,8 @@ class Link:
                     visual_mesh.get('mesh_name', self.name),
                     visual_mesh.get('extension', self.visual_mesh_extension),
                     visual_mesh.get('material_name', self.material_name),
+                    visual_mesh.get('origin_xyz'),
+                    visual_mesh.get('origin_rpy'),
                 )
         else:
             self.add_visual_xml(link, self.name, self.visual_mesh_extension, self.material_name)
