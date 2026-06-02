@@ -50,14 +50,14 @@ def collect_link_occurrences(root):
     links = []
     used_names = set()
 
-    for index, occs in enumerate(root.occurrences):
-        raw_name = occs.component.name if occs.component.name == 'base_link' else occs.name
-        link_name = sanitize_name(raw_name)
+    for occs in root.occurrences:
+        component_name = sanitize_name(occs.component.name)
+        occurrence_base_name = sanitize_name(occs.name.split(':')[0])
 
-        if occs.component.name == 'base_link' or link_name == 'base_link':
+        if component_name in ('base_link', 'link0') or occurrence_base_name in ('base_link', 'link0'):
             link_name = 'base_link'
-        elif index == 0:
-            link_name = 'base_link'
+        else:
+            link_name = component_name
 
         base_name = link_name
         suffix = 2
