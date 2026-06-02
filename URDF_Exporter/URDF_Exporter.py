@@ -22,6 +22,7 @@ def run(context):
     ui = None
     success_msg = 'Successfully create URDF file'
     msg = success_msg
+    export_state = None
     
     try:
         # --------------------
@@ -46,9 +47,7 @@ def run(context):
             ui.messageBox('Fusion2URDF was canceled', title)
             return 0
         
-        save_dir = save_dir + '/' + package_name
-        try: os.mkdir(save_dir)
-        except: pass     
+        save_dir = utils.make_unique_export_dir(save_dir, package_name)
 
         package_dir = os.path.abspath(os.path.dirname(__file__)) + '/package/'
         
@@ -70,6 +69,9 @@ def run(context):
             msg = 'There is no base_link. Please set base_link and run again.'
             ui.messageBox(msg, title)
             return 0
+
+        utils.write_model_snapshot(root, joints_dict, inertial_dict, save_dir)
+        utils.save_viewport_image(save_dir)
         
         links_xyz_dict = {}
         
@@ -89,12 +91,22 @@ def run(context):
         utils.update_cmakelists(save_dir, package_name)
         utils.update_package_xml(save_dir, package_name)
 
-        # Generate STl files        
-        utils.copy_occs(root)
-        utils.export_stl(design, save_dir, components)   
+        # Generate STL files. This temporarily creates export-only components, then
+        # removes them and restores original component names so the design is not
+        # left altered by a test export.
+        export_state = utils.copy_occs(root)
+        try:
+            utils.export_stl(design, save_dir, components)
+        finally:
+            utils.restore_occs(export_state)
         
         ui.messageBox(msg, title)
         
     except:
+        if export_state:
+            try:
+                utils.restore_occs(export_state)
+            except:
+                pass
         if ui:
             ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))

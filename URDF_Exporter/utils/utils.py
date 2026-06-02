@@ -6,17 +6,41 @@ Created on Sun May 12 19:15:34 2019
 """
 
 import adsk, adsk.core, adsk.fusion
+import json
 import os.path, re
+from datetime import datetime
 from xml.etree import ElementTree
 from xml.dom import minidom
 import shutil  # Replaced distutils with shutil
 import fileinput
 import sys
 
+def make_unique_export_dir(parent_dir, package_name):
+    """
+    Create a new export directory without overwriting an earlier export.
+    """
+    base_dir = os.path.join(parent_dir, package_name)
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir)
+        return base_dir
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    candidate = os.path.join(parent_dir, package_name + '_' + timestamp)
+    suffix = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(parent_dir, package_name + '_' + timestamp + '_' + str(suffix))
+        suffix += 1
+
+    os.makedirs(candidate)
+    return candidate
+
+
 def copy_occs(root):    
     """    
-    duplicate all the components
+    duplicate all body-containing root occurrences for STL export
     """    
+    export_state = {'created_occurrences': [], 'renamed_components': []}
+
     def copy_body(allOccs, occs):
         """    
         copy the old occs to new component
@@ -29,6 +53,8 @@ def copy_occs(root):
         # This support even when a component has some occses. 
 
         new_occs = allOccs.addNewComponent(transform)  # this create new occs
+        export_state['created_occurrences'].append(new_occs)
+        export_state['renamed_components'].append((occs.component, occs.component.name))
         if occs.component.name == 'base_link':
             occs.component.name = 'old_component'
             new_occs.component.name = 'base_link'
@@ -49,6 +75,28 @@ def copy_occs(root):
 
     for occs in oldOccs:
         occs.component.name = 'old_component'
+
+    return export_state
+
+
+def restore_occs(export_state):
+    """
+    Remove temporary export occurrences and restore component names changed by copy_occs.
+    """
+    if not export_state:
+        return
+
+    for occs in reversed(export_state.get('created_occurrences', [])):
+        try:
+            occs.deleteMe()
+        except:
+            pass
+
+    for component, original_name in reversed(export_state.get('renamed_components', [])):
+        try:
+            component.name = original_name
+        except:
+            pass
 
 
 def export_stl(design, save_dir, components):  
@@ -101,6 +149,48 @@ def file_dialog(ui):
     if dlgResult == adsk.core.DialogResults.DialogOK:
         return folderDlg.folder
     return False
+
+
+def write_model_snapshot(root, joints_dict, inertial_dict, save_dir):
+    """
+    Write model structure that can be inspected outside Fusion during development.
+    """
+    snapshot = {
+        'root_component': root.name,
+        'occurrences': [],
+        'joints': joints_dict,
+        'inertial_links': inertial_dict,
+    }
+
+    for occs in root.occurrences:
+        try:
+            body_count = occs.bRepBodies.count
+        except:
+            body_count = None
+
+        snapshot['occurrences'].append({
+            'occurrence_name': occs.name,
+            'component_name': occs.component.name,
+            'body_count': body_count,
+        })
+
+    file_name = os.path.join(save_dir, 'fusion2urdf_snapshot.json')
+    with open(file_name, mode='w') as f:
+        json.dump(snapshot, f, indent=2)
+
+
+def save_viewport_image(save_dir):
+    """
+    Best-effort viewport capture for debugging. Some Fusion environments do not
+    expose image capture to scripts, so failures are intentionally ignored.
+    """
+    try:
+        app = adsk.core.Application.get()
+        viewport = app.activeViewport
+        file_name = os.path.join(save_dir, 'fusion_view.png')
+        viewport.saveAsImageFile(file_name, 1600, 1000)
+    except:
+        pass
 
 
 def origin2center_of_mass(inertia, center_of_mass, mass):
