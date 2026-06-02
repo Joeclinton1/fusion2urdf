@@ -283,10 +283,23 @@ def _normalize_parent_child(parent, child):
     return parent, child
 
 
+def _normalize_gripper_parent_child(parent, child, link_map):
+    last_numbered = _last_numbered_link(link_map)
+    if last_numbered and parent == 'gripper' and child == last_numbered:
+        return last_numbered, 'gripper'
+    return parent, child
+
+
 def _is_adjacent_numbered_edge(parent, child):
     parent_index = _link_index(parent)
     child_index = _link_index(child)
     return parent_index is not None and child_index is not None and child_index == parent_index + 1
+
+
+def _is_allowed_export_edge(parent, child, link_map):
+    if _is_adjacent_numbered_edge(parent, child):
+        return True
+    return child == 'gripper' and parent == _last_numbered_link(link_map)
 
 
 def _last_numbered_link(link_map):
@@ -567,7 +580,7 @@ def _collapsed_joint_summary(joint_summary, link_map):
     included = True
     joint_type = joint_summary.get('joint_motion', {}).get('joint_type_name') if joint_summary.get('joint_motion') else None
 
-    if joint_type != 'revolute':
+    if joint_type not in ('revolute', 'prismatic'):
         return {
             'source_name': joint_summary.get('name'),
             'exported_name': None,
@@ -576,7 +589,7 @@ def _collapsed_joint_summary(joint_summary, link_map):
             'child_link': child,
             'parent_link': parent,
             'included_by_exporter': False,
-            'skip_reason': 'ignored non-revolute joint',
+            'skip_reason': 'ignored unsupported joint type',
             'inferred_reason': None,
             'occurrence_one_full_path': occurrence_one_path,
             'occurrence_two_full_path': occurrence_two_path,
@@ -590,6 +603,7 @@ def _collapsed_joint_summary(joint_summary, link_map):
 
     if parent and child:
         parent, child = _normalize_parent_child(parent, child)
+        parent, child = _normalize_gripper_parent_child(parent, child, link_map)
 
     if not child or not parent:
         included = False
@@ -597,7 +611,7 @@ def _collapsed_joint_summary(joint_summary, link_map):
     elif child == parent:
         included = False
         reason = 'internal_to_collapsed_link'
-    elif not _is_adjacent_numbered_edge(parent, child):
+    elif not _is_allowed_export_edge(parent, child, link_map):
         included = False
         reason = 'not_adjacent_exported_link_endpoints'
 
