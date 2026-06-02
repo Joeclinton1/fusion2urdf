@@ -40,10 +40,23 @@ def _normalize_parent_child(parent, child):
     return parent, child
 
 
+def _normalize_gripper_parent_child(parent, child, link_occurrences):
+    last_numbered = _last_numbered_link(link_occurrences)
+    if last_numbered and parent == 'gripper' and child == last_numbered:
+        return last_numbered, 'gripper'
+    return parent, child
+
+
 def _is_adjacent_numbered_edge(parent, child):
     parent_index = _link_index(parent)
     child_index = _link_index(child)
     return parent_index is not None and child_index is not None and child_index == parent_index + 1
+
+
+def _is_allowed_export_edge(parent, child, link_occurrences):
+    if _is_adjacent_numbered_edge(parent, child):
+        return True
+    return child == 'gripper' and parent == _last_numbered_link(link_occurrences)
 
 
 def _last_numbered_link(link_occurrences):
@@ -70,6 +83,17 @@ def _has_link(link_occurrences, link_name):
 
 def _edge_joint_name(parent, child):
     return utils.sanitize_name(parent + '_to_' + child)
+
+
+def _export_origin_for_link(link_name, joints_dict):
+    if link_name == 'base_link':
+        return [0, 0, 0]
+
+    for joint in joints_dict.values():
+        if joint.get('child') == link_name:
+            return joint.get('xyz')
+
+    return None
 
 
 def _joint_xyz(joint):
@@ -249,11 +273,11 @@ def make_joints_dict(root, msg, export_settings=None):
     for owner_component, joint in utils.all_design_joints(root):
         joint_dict = {}
         joint_type = joint_type_list[joint.jointMotion.jointType]
-        if joint_type != 'revolute':
+        if joint_type not in ('revolute', 'prismatic'):
             skipped_joints.append({
                 'name': joint.name,
                 'owner_component': owner_component.name,
-                'reason': 'ignored non-revolute joint type ' + joint_type,
+                'reason': 'ignored unsupported joint type ' + joint_type,
                 'occurrence_one': joint.occurrenceOne.fullPathName if joint.occurrenceOne else None,
                 'occurrence_two': joint.occurrenceTwo.fullPathName if joint.occurrenceTwo else None,
             })
@@ -283,6 +307,24 @@ def make_joints_dict(root, msg, export_settings=None):
                 break
             else:  # if there is no angle limit
                 joint_dict['type'] = 'continuous'
+        elif joint_type == 'prismatic':
+            joint_dict['axis'] = [round(i, 6) for i in \
+                joint.jointMotion.slideDirectionVector.asArray()] ## In Fusion, exported axis is normalized.
+            max_enabled = joint.jointMotion.slideLimits.isMaximumValueEnabled
+            min_enabled = joint.jointMotion.slideLimits.isMinimumValueEnabled
+            if max_enabled and min_enabled:
+                # Fusion API distance values are in centimeters. URDF uses meters.
+                joint_dict['upper_limit'] = round(joint.jointMotion.slideLimits.maximumValue / 100.0, 6)
+                joint_dict['lower_limit'] = round(joint.jointMotion.slideLimits.minimumValue / 100.0, 6)
+            elif max_enabled and not min_enabled:
+                msg = joint.name + 'is not set its lower limit. Please set it and try again.'
+                break
+            elif not max_enabled and min_enabled:
+                msg = joint.name + 'is not set its upper limit. Please set it and try again.'
+                break
+            else:
+                msg = joint.name + 'is a slider joint without limits. Please set its travel limits and try again.'
+                break
 
         parent = utils.link_name_for_occurrence(joint.occurrenceTwo, link_occurrences)
         child = utils.link_name_for_occurrence(joint.occurrenceOne, link_occurrences)
@@ -290,6 +332,7 @@ def make_joints_dict(root, msg, export_settings=None):
 
         if parent and child:
             parent, child = _normalize_parent_child(parent, child)
+            parent, child = _normalize_gripper_parent_child(parent, child, link_occurrences)
 
         if not parent or not child:
             skipped_joints.append({
@@ -311,7 +354,7 @@ def make_joints_dict(root, msg, export_settings=None):
             })
             continue
 
-        if not _is_adjacent_numbered_edge(parent, child):
+        if not _is_allowed_export_edge(parent, child, link_occurrences):
             skipped_joints.append({
                 'name': joint.name,
                 'owner_component': owner_component.name,
@@ -336,7 +379,10 @@ def make_joints_dict(root, msg, export_settings=None):
         joint_dict['parent'] = parent
         joint_dict['child'] = child
 
-        xyz = _joint_xyz(joint)
+        if child == 'gripper':
+            xyz = _export_origin_for_link(parent, joints_dict)
+        else:
+            xyz = _joint_xyz(joint)
         if xyz is None:
             msg = joint.name + " doesn't have joint origin. Please set it and run again."
             break
@@ -365,7 +411,7 @@ def make_joints_dict(root, msg, export_settings=None):
                 'lower_limit': 0.0,
                 'parent': parent,
                 'child': 'gripper',
-                'xyz': [0, 0, 0],
+                'xyz': _export_origin_for_link(parent, joints_dict) or [0, 0, 0],
                 'inferred_reason': 'synthetic fixed joint from last numbered link to gripper',
             }
             used_edges.add(edge)
