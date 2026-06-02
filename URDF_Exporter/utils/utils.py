@@ -16,8 +16,79 @@ import fileinput
 import sys
 import math
 
+DEFAULT_HUMANOID_SHOULDER_HEIGHT = 0.45
+MIN_MODELED_HUMANOID_HEIGHT = 0.3
+
 def sanitize_name(name):
     return re.sub('[ :()]', '_', name)
+
+
+def _link_index(link_name):
+    if link_name == 'base_link' or link_name == 'link0':
+        return 0
+
+    match = re.match(r'^link(\d+)$', link_name or '')
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def _joint_xyz(joint):
+    xyz = joint.get('xyz') or [0, 0, 0]
+    try:
+        return [float(xyz[0]), float(xyz[1]), float(xyz[2])]
+    except:
+        return None
+
+
+def _distance(point_a, point_b):
+    return math.sqrt(sum([(a - b) ** 2 for a, b in zip(point_a, point_b)]))
+
+
+def _ordered_numbered_chain_joints(joints_dict):
+    ordered = []
+
+    for joint in joints_dict.values():
+        if joint.get('type') == 'fixed':
+            continue
+
+        parent_index = _link_index(joint.get('parent'))
+        child_index = _link_index(joint.get('child'))
+        if parent_index is None or child_index is None:
+            continue
+        if child_index != parent_index + 1:
+            continue
+
+        xyz = _joint_xyz(joint)
+        if xyz is None:
+            continue
+
+        ordered.append((child_index, xyz))
+
+    ordered.sort(key=lambda item: item[0])
+    return [xyz for _, xyz in ordered]
+
+
+def humanoid_arm_length(joints_dict):
+    """
+    Estimate reach from the ordered revolute joint origins.
+
+    The exporter collapses each numbered top-level component into a URDF link.
+    For humanoid placement, the useful fallback height is the modeled chain
+    length, not the tabletop Z position of the first joint.
+    """
+    joint_positions = _ordered_numbered_chain_joints(joints_dict)
+    if len(joint_positions) < 2:
+        return 0.0
+
+    length = 0.0
+    previous = joint_positions[0]
+    for current in joint_positions[1:]:
+        length += _distance(previous, current)
+        previous = current
+
+    return round(length, 6)
 
 
 def _settings_path():
@@ -76,6 +147,7 @@ def export_profile_settings(profile):
         'arm_side': None,
         'root_link': 'base_link',
         'root_rpy': [0, 0, 0],
+        'shoulder_height': DEFAULT_HUMANOID_SHOULDER_HEIGHT,
     }
 
     if profile == 'humanoid-left':
@@ -94,6 +166,42 @@ def export_profile_settings(profile):
         })
 
     return settings
+
+
+def humanoid_shoulder_height(joints_dict, default_height=DEFAULT_HUMANOID_SHOULDER_HEIGHT):
+    """
+    Return a URDF Z shoulder height for humanoid profiles.
+
+    If the source model is already placed at a body-height shoulder, preserve
+    that. Otherwise lift tabletop-modeled arms by their measured chain length.
+    """
+    first_joint = None
+    first_child_index = None
+
+    for joint in joints_dict.values():
+        child_index = _link_index(joint.get('child'))
+        if child_index is None:
+            continue
+        if first_child_index is None or child_index < first_child_index:
+            first_child_index = child_index
+            first_joint = joint
+
+    if not first_joint:
+        return 0.0
+
+    xyz = _joint_xyz(first_joint)
+    try:
+        modeled_height = float(xyz[2])
+        if abs(modeled_height) >= MIN_MODELED_HUMANOID_HEIGHT:
+            return round(modeled_height, 6)
+    except:
+        pass
+
+    arm_length = humanoid_arm_length(joints_dict)
+    if arm_length > 0.0:
+        return arm_length
+
+    return round(float(default_height), 6)
 
 
 def prompt_export_settings(ui):

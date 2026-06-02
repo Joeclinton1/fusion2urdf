@@ -123,16 +123,17 @@ def write_gazebo_endtag(file_name):
         f.write('</robot>\n')
 
 
-def write_humanoid_root_urdf(file_name, export_settings):
+def write_humanoid_root_urdf(file_name, export_settings, shoulder_height=0.0):
     side = export_settings.get('arm_side') or 'arm'
     rpy = export_settings.get('root_rpy') or [0, 0, 0]
     rpy_text = ' '.join([str(_) for _ in rpy])
+    shoulder_height_text = str(round(shoulder_height, 6))
 
     with open(file_name, mode='a') as f:
         f.write('<link name="humanoid_root"/>\n')
         f.write('\n')
         f.write('<joint name="{}_shoulder_mount" type="fixed">\n'.format(side))
-        f.write('  <origin xyz="0 0 0" rpy="{}"/>\n'.format(rpy_text))
+        f.write('  <origin xyz="0 0 {}" rpy="{}"/>\n'.format(shoulder_height_text, rpy_text))
         f.write('  <parent link="humanoid_root"/>\n')
         f.write('  <child link="base_link"/>\n')
         f.write('</joint>\n')
@@ -206,7 +207,11 @@ def write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, s
     write_material_definitions(file_name, materials_dict)
 
     if export_settings and export_settings.get('is_humanoid'):
-        write_humanoid_root_urdf(file_name, export_settings)
+        shoulder_height = utils.humanoid_shoulder_height(
+            joints_dict,
+            export_settings.get('shoulder_height', utils.DEFAULT_HUMANOID_SHOULDER_HEIGHT),
+        )
+        write_humanoid_root_urdf(file_name, export_settings, shoulder_height)
 
     write_link_urdf(joints_dict, repo, links_xyz_dict, file_name, inertial_dict, materials_dict)
     write_joint_urdf(joints_dict, repo, links_xyz_dict, file_name)
