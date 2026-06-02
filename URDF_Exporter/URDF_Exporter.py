@@ -56,7 +56,7 @@ def run(context):
         # set dictionaries
         
         # Generate joints_dict. All joints are related to root. 
-        joints_dict, msg = Joint.make_joints_dict(root, msg)
+        joints_dict, msg = Joint.make_joints_dict(root, msg, export_settings)
         if msg != success_msg:
             ui.messageBox(msg, title)
             return 0   
@@ -72,7 +72,7 @@ def run(context):
             return 0
         
         links_xyz_dict = {}
-        
+
         # --------------------
         # Generate URDF
         Write.write_browser_urdf(joints_dict, links_xyz_dict, inertial_dict, robot_name, save_dir, export_settings, materials_dict)

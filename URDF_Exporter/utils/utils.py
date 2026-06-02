@@ -18,6 +18,7 @@ import math
 
 DEFAULT_HUMANOID_SHOULDER_HEIGHT = 0.45
 MIN_MODELED_HUMANOID_HEIGHT = 0.3
+DEFAULT_CENTER_POSITIVE_JOINT_LIMITS = True
 
 def sanitize_name(name):
     return re.sub('[ :()]', '_', name)
@@ -104,10 +105,29 @@ def _settings_path():
     return os.path.join(settings_dir, 'settings.json')
 
 
-def _load_export_profile():
+def settings_path():
+    return _settings_path()
+
+
+def _load_settings():
     try:
         with open(_settings_path(), mode='r') as f:
-            settings = json.load(f)
+            return json.load(f)
+    except:
+        return {}
+
+
+def _save_settings(settings):
+    try:
+        with open(_settings_path(), mode='w') as f:
+            json.dump(settings, f, indent=2)
+    except:
+        pass
+
+
+def _load_export_profile():
+    try:
+        settings = _load_settings()
         return _normalize_export_profile(settings.get('export_profile', 'tabletop'))
     except:
         return 'tabletop'
@@ -115,8 +135,9 @@ def _load_export_profile():
 
 def _save_export_profile(profile):
     try:
-        with open(_settings_path(), mode='w') as f:
-            json.dump({'export_profile': profile}, f, indent=2)
+        settings = _load_settings()
+        settings['export_profile'] = profile
+        _save_settings(settings)
     except:
         pass
 
@@ -139,8 +160,9 @@ def _normalize_export_profile(value):
     return aliases.get(value, value)
 
 
-def export_profile_settings(profile):
+def export_profile_settings(profile, saved_settings=None):
     profile = _normalize_export_profile(profile)
+    saved_settings = saved_settings or {}
     settings = {
         'profile': profile,
         'is_humanoid': False,
@@ -148,6 +170,11 @@ def export_profile_settings(profile):
         'root_link': 'base_link',
         'root_rpy': [0, 0, 0],
         'shoulder_height': DEFAULT_HUMANOID_SHOULDER_HEIGHT,
+        'center_positive_joint_limits': saved_settings.get(
+            'center_positive_joint_limits',
+            DEFAULT_CENTER_POSITIVE_JOINT_LIMITS,
+        ),
+        'joint_limits': saved_settings.get('joint_limits', {}),
     }
 
     if profile == 'humanoid-left':
@@ -166,6 +193,99 @@ def export_profile_settings(profile):
         })
 
     return settings
+
+
+def _limit_number(value, degrees=False):
+    try:
+        number = float(value)
+    except:
+        return None
+    if degrees:
+        number = math.radians(number)
+    return round(number, 6)
+
+
+def parse_joint_limit_override(value):
+    """
+    Return [lower, upper] in radians from a JSON setting.
+
+    Supported forms:
+      "joint": [-1.57, 1.57]
+      "joint": {"lower": -90, "upper": 90, "unit": "deg"}
+      "joint": {"degrees": [-90, 90]}
+      "joint": {"radians": [-1.57, 1.57]}
+    """
+    degrees = False
+    lower = None
+    upper = None
+
+    if isinstance(value, dict):
+        if 'degrees' in value:
+            value = value.get('degrees')
+            degrees = True
+        elif 'radians' in value:
+            value = value.get('radians')
+        else:
+            unit = str(value.get('unit', '')).lower()
+            degrees = unit in ('deg', 'degree', 'degrees')
+            lower = value.get('lower')
+            upper = value.get('upper')
+
+    if isinstance(value, list) or isinstance(value, tuple):
+        if len(value) < 2:
+            return None
+        lower = value[0]
+        upper = value[1]
+        if len(value) >= 3:
+            unit = str(value[2]).lower()
+            degrees = unit in ('deg', 'degree', 'degrees')
+
+    lower = _limit_number(lower, degrees)
+    upper = _limit_number(upper, degrees)
+    if lower is None or upper is None:
+        return None
+    if lower > upper:
+        lower, upper = upper, lower
+    return [lower, upper]
+
+
+def center_positive_joint_limit(joint_dict):
+    if joint_dict.get('type') != 'revolute':
+        return False
+
+    try:
+        lower = float(joint_dict.get('lower_limit'))
+        upper = float(joint_dict.get('upper_limit'))
+    except:
+        return False
+
+    if lower < -1e-6 or upper <= lower:
+        return False
+
+    span = upper - lower
+    if span <= 1e-6:
+        return False
+
+    joint_dict['lower_limit'] = round(-span / 2.0, 6)
+    joint_dict['upper_limit'] = round(span / 2.0, 6)
+    joint_dict['limit_source'] = 'centered positive Fusion range'
+    return True
+
+
+def apply_joint_limit_settings(joint_name, joint_dict, export_settings=None):
+    export_settings = export_settings or {}
+    overrides = export_settings.get('joint_limits') or {}
+    override = parse_joint_limit_override(overrides.get(joint_name))
+
+    if override:
+        joint_dict['type'] = 'revolute'
+        joint_dict['lower_limit'] = override[0]
+        joint_dict['upper_limit'] = override[1]
+        joint_dict['limit_source'] = 'settings override'
+        return
+
+    if export_settings.get('center_positive_joint_limits', DEFAULT_CENTER_POSITIVE_JOINT_LIMITS):
+        center_positive_joint_limit(joint_dict)
 
 
 def humanoid_shoulder_height(joints_dict, default_height=DEFAULT_HUMANOID_SHOULDER_HEIGHT):
@@ -205,13 +325,16 @@ def humanoid_shoulder_height(joints_dict, default_height=DEFAULT_HUMANOID_SHOULD
 
 
 def prompt_export_settings(ui):
-    default_profile = _load_export_profile()
+    saved_settings = _load_settings()
+    default_profile = _normalize_export_profile(saved_settings.get('export_profile', 'tabletop'))
     prompt = (
         'Export profile:\n'
         '  tabletop\n'
         '  humanoid-left\n'
         '  humanoid-right\n\n'
-        'Humanoid profiles add a fixed shoulder mount that rotates the whole arm.'
+        'Humanoid profiles add a fixed shoulder mount that rotates the whole arm.\n\n'
+        'Optional joint limit overrides can be edited in:\n'
+        '{}'.format(_settings_path())
     )
 
     try:
@@ -230,7 +353,8 @@ def prompt_export_settings(ui):
         return None
 
     _save_export_profile(profile)
-    return export_profile_settings(profile)
+    saved_settings['export_profile'] = profile
+    return export_profile_settings(profile, saved_settings)
 
 
 def make_unique_export_dir(parent_dir, package_name):

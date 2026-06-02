@@ -217,7 +217,7 @@ class Joint:
         self.tran_xml = "\n".join(utils.prettify(tran).split("\n")[1:])
 
 
-def make_joints_dict(root, msg):
+def make_joints_dict(root, msg, export_settings=None):
     """
     joints_dict holds parent, axis and xyz informatino of the joints
     
@@ -351,6 +351,7 @@ def make_joints_dict(root, msg):
             while joint_name in joints_dict:
                 joint_name = base_name + '_' + str(suffix)
                 suffix += 1
+        utils.apply_joint_limit_settings(joint_name, joint_dict, export_settings)
         joints_dict[joint_name] = joint_dict
 
     if _has_link(link_occurrences, 'gripper'):
