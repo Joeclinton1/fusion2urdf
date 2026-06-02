@@ -19,6 +19,12 @@ JOINT_TYPES = [
 ]
 
 
+def _sanitize_name(name):
+    if name is None:
+        return None
+    return ''.join('_' if c in ' :()' else c for c in str(name))
+
+
 def _safe_text(value):
     try:
         if value is None:
@@ -239,6 +245,79 @@ def _flat_occurrences_from_tree(node):
     return items
 
 
+def _top_occurrence_name(full_path_name):
+    if not full_path_name:
+        return None
+    return full_path_name.split('+')[0]
+
+
+def _build_link_map(root_occurrences):
+    links = []
+    used_names = set()
+
+    for occurrence in root_occurrences:
+        component_name = _sanitize_name(occurrence.get('component_name'))
+        occurrence_name = occurrence.get('name')
+        occurrence_base_name = _sanitize_name(occurrence_name.split(':')[0] if occurrence_name else None)
+
+        if component_name in ('base_link', 'link0') or occurrence_base_name in ('base_link', 'link0'):
+            link_name = 'base_link'
+            base_reason = 'component_or_occurrence_named_base_link_or_link0'
+        else:
+            link_name = component_name
+            base_reason = None
+
+        original_link_name = link_name
+        suffix = 2
+        while link_name in used_names:
+            link_name = original_link_name + '_' + str(suffix)
+            suffix += 1
+
+        used_names.add(link_name)
+        links.append({
+            'occurrence_name': occurrence_name,
+            'component_name': occurrence.get('component_name'),
+            'path': occurrence.get('path'),
+            'link_name': link_name,
+            'is_base_link': link_name == 'base_link',
+            'base_reason': base_reason,
+            'mass_kg': occurrence.get('physical_properties', {}).get('mass_kg'),
+            'center_of_mass_cm': occurrence.get('physical_properties', {}).get('center_of_mass_cm'),
+            'bodies_count': occurrence.get('bodies_count'),
+            'child_occurrences_count': occurrence.get('child_occurrences_count'),
+            'is_referenced_component': occurrence.get('is_referenced_component'),
+        })
+
+    return links
+
+
+def _link_for_full_path(full_path_name, link_map):
+    top_name = _top_occurrence_name(full_path_name)
+    if not top_name:
+        return None
+
+    for link in link_map:
+        if link.get('occurrence_name') == top_name:
+            return link.get('link_name')
+
+    return None
+
+
+def _name_collisions(items, field):
+    buckets = {}
+    for item in items:
+        value = item.get(field)
+        if not value:
+            continue
+        buckets.setdefault(value, []).append(item)
+
+    return [
+        {'value': value, 'count': len(matches), 'items': matches}
+        for value, matches in buckets.items()
+        if len(matches) > 1
+    ]
+
+
 def _joint_type_name(joint_motion):
     try:
         index = joint_motion.jointType
@@ -403,6 +482,51 @@ def _joint_summary(joint, owner_component_name):
     return data
 
 
+def _collapsed_joint_summary(joint_summary, link_map):
+    occurrence_one_path = None
+    occurrence_two_path = None
+
+    try:
+        occurrence_one_path = joint_summary['occurrence_one']['full_path_name']
+    except:
+        pass
+
+    try:
+        occurrence_two_path = joint_summary['occurrence_two']['full_path_name']
+    except:
+        pass
+
+    child = _link_for_full_path(occurrence_one_path, link_map)
+    parent = _link_for_full_path(occurrence_two_path, link_map)
+    reason = None
+    included = True
+
+    if not child or not parent:
+        included = False
+        reason = 'could_not_map_endpoint_to_top_level_link'
+    elif child == parent:
+        included = False
+        reason = 'internal_to_collapsed_link'
+
+    return {
+        'source_name': joint_summary.get('name'),
+        'owner_component_name': joint_summary.get('owner_component_name'),
+        'type': joint_summary.get('joint_motion', {}).get('joint_type_name') if joint_summary.get('joint_motion') else None,
+        'child_link': child,
+        'parent_link': parent,
+        'included_by_exporter': included,
+        'skip_reason': reason,
+        'occurrence_one_full_path': occurrence_one_path,
+        'occurrence_two_full_path': occurrence_two_path,
+        'axis': joint_summary.get('joint_motion', {}).get('rotation_axis_vector') if joint_summary.get('joint_motion') else None,
+        'slide_axis': joint_summary.get('joint_motion', {}).get('slide_direction_vector') if joint_summary.get('joint_motion') else None,
+        'geometry_or_origin_one': joint_summary.get('geometry_or_origin_one'),
+        'geometry_or_origin_two': joint_summary.get('geometry_or_origin_two'),
+        'rotation_limits': joint_summary.get('joint_motion', {}).get('rotation_limits') if joint_summary.get('joint_motion') else None,
+        'slide_limits': joint_summary.get('joint_motion', {}).get('slide_limits') if joint_summary.get('joint_motion') else None,
+    }
+
+
 def _as_built_joint_summary(joint, owner_component_name):
     data = {
         'owner_component_name': owner_component_name,
@@ -513,6 +637,10 @@ def run(context):
             flat_occurrences.extend(_flat_occurrences_from_tree(node))
 
         joints, as_built_joints = _all_joints(design)
+        link_map = _build_link_map([dict((k, v) for k, v in node.items() if k != 'children') for node in occurrence_tree])
+        collapsed_joints = [_collapsed_joint_summary(joint, link_map) for joint in joints]
+        included_collapsed_joints = [joint for joint in collapsed_joints if joint['included_by_exporter']]
+        skipped_collapsed_joints = [joint for joint in collapsed_joints if not joint['included_by_exporter']]
 
         data = {
             'generated_at': datetime.now().isoformat(),
@@ -530,6 +658,16 @@ def run(context):
             'components': [_component_summary(component) for component in _iter_collection(design.allComponents)],
             'occurrence_tree': occurrence_tree,
             'flat_occurrences': flat_occurrences,
+            'exporter_preview': {
+                'link_map': link_map,
+                'base_link_count': len([link for link in link_map if link['is_base_link']]),
+                'base_link_candidates': [link for link in link_map if link['is_base_link']],
+                'link_name_collisions': _name_collisions(link_map, 'link_name'),
+                'component_name_collisions': _name_collisions(link_map, 'component_name'),
+                'collapsed_joints': collapsed_joints,
+                'included_collapsed_joints': included_collapsed_joints,
+                'skipped_collapsed_joints': skipped_collapsed_joints,
+            },
             'joints': joints,
             'as_built_joints': as_built_joints,
             'viewport_image': _save_viewport(output_dir),
@@ -548,6 +686,10 @@ def run(context):
             f.write('Flat occurrences: {}\n'.format(len(flat_occurrences)))
             f.write('Joints: {}\n'.format(len(joints)))
             f.write('As-built joints: {}\n'.format(len(as_built_joints)))
+            f.write('Exporter preview links: {}\n'.format(len(link_map)))
+            f.write('Exporter preview base_link count: {}\n'.format(data['exporter_preview']['base_link_count']))
+            f.write('Exporter preview included joints: {}\n'.format(len(included_collapsed_joints)))
+            f.write('Exporter preview skipped joints: {}\n'.format(len(skipped_collapsed_joints)))
             f.write('JSON: {}\n'.format(json_path))
 
         ui.messageBox('Diagnostics written to:\n{}'.format(output_dir), title)
