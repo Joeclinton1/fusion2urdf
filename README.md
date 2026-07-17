@@ -1,223 +1,174 @@
-# URDF Exporter for Fusion 360
+# Fusion2URDF — flexible component exporter
 
-This is a **fork** of the original [syuntoku14/fusion2urdf](https://github.com/syuntoku14/fusion2urdf) repository. 
+Turn a Fusion 360 assembly into a clean, browser-ready URDF without flattening your CAD model first.
 
-## **Changes Made**
-- **Python 3.12 Compatibility**: Replaced the deprecated `distutils.dir_util` with `shutil` for directory operations, ensuring compatibility with **Python 3.12** used by Fusion 360.
-- **Error Handling**: Improved error handling to prevent `FileExistsError` when copying directories if they already exist.
-- **Directory Operations**: All directory copying is now done using `shutil.copytree`.
+This fork builds on [syuntoku14/fusion2urdf](https://github.com/syuntoku14/fusion2urdf) and is aimed at robots whose links contain real subassemblies: bearings, brackets, cameras, gripper parts, electronics, and other nested components. Keep that useful structure in Fusion; the exporter treats each root-level occurrence as one URDF link and includes everything nested beneath it.
 
-## **Notes**
-- The script is updated for use with **Python 3.12**, as Fusion 360 no longer supports `distutils` in versions above Python 3.10.
+## What changed from the original
 
----
+| Original exporter | This fork |
+| --- | --- |
+| A link component had to contain bodies only | A root-level link can contain nested components and bodies |
+| Nested assemblies could produce missing or incorrect links | Nested content is collapsed into its containing root-level URDF link |
+| Export focused on a ROS 1/Xacro package | Export produces a compact plain-URDF folder with relative mesh paths |
+| STL meshes were used for the model | OBJ/MTL visuals preserve Fusion colours; STL meshes remain available for collision geometry |
+| Limited help when Fusion's component or joint structure was unexpected | An optional read-only diagnostics script previews link mapping and reports skipped joints |
+| One model orientation | `tabletop`, `humanoid-left`, and `humanoid-right` export profiles are available |
+| Fusion joint limits were copied directly | Positive-only revolute ranges can be centred automatically, with per-joint overrides in a settings file |
+| Older directory utilities could fail on current Fusion Python versions | File handling works with Fusion's Python 3.12 environment and avoids overwriting earlier exports |
 
+The exporter also:
 
+- leaves the Fusion design structure alone during export;
+- calculates mass, centre of mass, and inertia for each collapsed link;
+- maps joints found anywhere in the design back to their root-level links;
+- ignores joints internal to a collapsed link and duplicate edges;
+- converts Fusion slider limits from centimetres to URDF metres;
+- supports an optional `gripper` link, including separate `PincOpen` and camera visual meshes when those child names are present;
+- creates a new timestamped output directory when an export with the same name already exists.
 
-## Updated!!!
-* 2021/01/09: Fix xyz calculation. 
-  * If you see that your components move arround the map center in rviz try this update 
-  * More Infos see: https://forums.autodesk.com/t5/fusion-360-api-and-scripts/difference-of-geometryororiginone-and-geometryororiginonetwo/m-p/9837767
+## Install
 
-* 2020/11/10: README fix
-  * MacOS Installation command fixed in README
-  * Date format unified in README to yyyy/dd/mm
-  * Shifted Installation Upwards for better User Experience and easier to find
-* 2020/01/04: Multiple updates:
-  * no longer a need to run a bash script to convert stls
-  * some cleanup around joint and transmission generation
-  * defines a sample material tag instead of defining a material in each link
-  * fusion2urdf now generates a self-contained ROS {robot_name}_description package
-  * now launched by roslaunch {robot_name}_description display.launch
-  * changed fusion2urdf output from urdf to xacro for more flexibility
-  * separate out material, transmissions, gazebo elements to separate files
-* 2018/20/10: Fixed functions to generate launch files
-* 2018/25/09: Supports joint types "Rigid", "Slider" & Supports the joints' limit(for "Revolute" and "Slider"). 
-* 2018/19/09: Fixed the bugs about the center of the mass and the inertia.
+Download or clone this repository, then copy `URDF_Exporter` into Fusion 360's scripts directory. Copy `Fusion2URDF_Diagnostics` as well if you want the troubleshooting tool.
 
-
-## Installation
-
-Run the following command in your shell.
-
-##### Windows (In PowerShell)
+### Windows PowerShell
 
 ```powershell
-cd <path to fusion2urdf>
-Copy-Item ".\URDF_Exporter\" -Destination "${env:APPDATA}\Autodesk\Autodesk Fusion 360\API\Scripts\" -Recurse
+$fusionScripts = Join-Path $env:APPDATA "Autodesk\Autodesk Fusion 360\API\Scripts"
+Copy-Item ".\URDF_Exporter" -Destination $fusionScripts -Recurse -Force
+Copy-Item ".\Fusion2URDF_Diagnostics" -Destination $fusionScripts -Recurse -Force
 ```
 
-##### macOS (In bash or zsh)
+### macOS
 
 ```bash
-cd <path to fusion2urdf>
-cp -r ./URDF_Exporter "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts/"
+fusion_scripts="$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts"
+cp -R ./URDF_Exporter "$fusion_scripts/"
+cp -R ./Fusion2URDF_Diagnostics "$fusion_scripts/"
 ```
 
-## What is this script?
-This is a fusion 360 script to export urdf from fusion 360 directly.
+Restart Fusion 360, or refresh the **Scripts** tab in **Scripts and Add-Ins**, after installing or updating the folders.
 
-This exports:
-* .urdf file of your model
-* .launch and .yaml files to simulate your robot on gazebo
-* .stl files of your model
+## Prepare the Fusion model
 
-### Sample 
+The root of the design should contain one occurrence per moving robot link. Nested components belong inside those occurrences and are welcome.
 
-The following test model doesn't stand upright because the z axis is not upright in default fusion 360.
-Make sure z axis is upright in your fusion 360 model if you want. 
-
-#### original model
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/industrial_robot.png" alt="industrial_robot" title="industrial_robot" width="300" height="300">
-
-#### Gazebo simulation of exported .urdf and .launch
-* center of mass
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/center_of_mass.png" alt="center_of_mass" title="center_of_mass" width="300" height="300">
-
-* collision
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/collision.png" alt="collision" title="collision" width="300" height="300">
-
-* inertia
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/inertia.png" alt="inertia" title="inertia" width="300" height="300">
-
-
-## Before using this script
-
-Before using this script, make sure that your model has all the "links" as components. You have to define the links by creating corresiponding components. For example, this model(https://grabcad.com/library/spotmini-robot-1) is not supported unless you define the "base_link". 
-
-In addition to that, you should be careful when define your joints. The **parent links** should be set as **Component2** when you define the joint, not as Component1. For example, if you define the "base_link" as Component1 when you define the joints, an error saying "KeyError: base_link__1" will show up.
-
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/spot_mini.PNG" alt="spot_mini" title="spot_mini" width="300" height="300">
-
-Also, make sure components of your model has only bodies. **Nested components are not supported**.
-For example, this works:
-
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/only_bodies.PNG" alt="only_bodies" title="only_bodies" width="300" height="300">
-
-but this doesn't work since the "face (3):1" component contains other components. A component must contain only bodies:
-
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/nest_components.PNG" alt="nest_components" title="nest_components" width="300" height="300">
-
-Sometimes this script exports abnormal urdf without any error messages. In that case, the joints should have problems. Redefine the joints and run again.
-
-In addition to that, make sure that this script currently supports only "Rigid", "Slider" and "Revolute".
-
-
-## Complex Kinematic Loops and Spherical joints (may be fixed later):
-
-DO NOT use Fusion 360's inbuilt joint editor dialouge for positioning joints
-
-For example, [@rohit-kumar-j](https://github.com/rohit-kumar-j) had this complicated robot to assemble. There are over.. some 50 joints in all, including some forming loops within the structure like a [4-bar mechanism](https://www.youtube.com/watch?v=eYOt6SEKHFs&ab_channel=YuhangHu), also called **kinematic loops**.
-
-![image](https://user-images.githubusercontent.com/37873142/133144979-30218496-09d4-40bb-9af7-95448a7665ee.png)
-
-As you can see below, when fusion initailly forms joints, it might not align where you want it to align to. In the image below, the cylinder's cap side doesn't exaclty coincide with the position of the pin where it needs to be join. The red arrow shows the mismatch in initial joint positioning by fusion.
-
-![image](https://user-images.githubusercontent.com/37873142/133145309-298f17a4-bd62-48fa-b1c2-54f58e26fce4.png)
-
-If you were to manually drag the parts and align them as shown below, it would cause cascading problems with the visual and collision properties of certain links. 
-
-![Capture](https://user-images.githubusercontent.com/37873142/133146628-c4c2b8dd-ac7b-41e8-bd62-1d2c2b80adce.PNG)
-
-Below you can see one of the cylinders is mismatched as compared to the others (red and grey colors are cylinders) 
-(The below urdf is visualized in pybullet)
-
-![image](https://user-images.githubusercontent.com/37873142/133141659-440a0a4a-1afa-4751-99ba-fc3db02f7450.png)
-
-See Also: Similar to this issue, but only for a few axes [here](https://github.com/yanshil/Fusion2PyBullet/issues/6) (turns out there was a fusion API change back then, and the exporter wasn't yet updated [See this commit](https://github.com/syuntoku14/fusion2urdf/commit/8786e6318cdcaaf32070148451a27ab6e4f6697d), but it now is)
-
-
-**The fix for this is to leave Fusion's joint controls unedited and form joints for the robot joints (See below)**
-
-
-A similar issue with another set of joints at the ankle was fixed by following the above fromat. [Here is the video](https://www.youtube.com/watch?v=0hfkm7vv5o8&ab_channel=JRohit)
-
-For spherical joints, it is better to keep them revolute and define the joints as spherical, later in the generated URDF(provided the urdf parser in your visualizer/physics engine(gazebo,webots,pybullet,mujoco,etc) supports spherical joints, in pybullet it does).
-The ankle joint below has 4 spherical joints and only two of them were defined as revolute while exporting from fusion 360. The other 2 spherical joints were created in pybullet using pybullet's inbuilt functions for creating kinematic loops.(see the gif below)
-
-![youtube-video-gif](https://user-images.githubusercontent.com/37873142/133144404-45d9e444-8ddb-4b5f-8970-6e637b750faa.gif)
-
-
-## In some cases, before export Turn off "Capture design history"
-
-For preplanning the component placement when working/assembling your own robot. It is recomended to have separate names for components and save individual components in a separate folder, create a back up and, break link with the original. This folder can be later deleted after genearating the urdf. See [Issue #51](https://github.com/syuntoku14/fusion2urdf/issues/51) for problem with "copy-paste" vs "copy-paste new".
-
-
-
-## How to use
-
-As an example, I'll export a urdf file from this cool fusion360 robot-arm model(https://grabcad.com/library/industrial-robot-10).
-This was created by [sanket patil](https://grabcad.com/sanket.patil-16)
-
-### Install in Shell 
-
-Run the [installation command](#installation) in your shell.
-
-### Run in Fusion 360
-
-Click ADD-INS in fusion 360, then choose ****fusion2urdf****. 
-
-**This script will change your model. So before running it, copy your model to backup.**
-
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/copy.png" alt="copy" title="copy" width="300" height="300">
-
-Run the script and wait a few seconds(or a few minutes). Then a folder dialog will show up. Choose where you want to save the urdf (A folder "Desktop/test" is chosen in this example").
-Maybe some error will occur when you run the script. Fix them according to the instruction. In this case, something wrong with joint "Rev 7". Probably it can be solved by just redefining the joint.
-
-![error](https://github.com/syuntoku14/fusion2urdf/blob/images/error.png)
-
-**You must define the base component**. Rename the base component as "base_link". 
-
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/cautions.PNG" alt="cautions" title="cautions" width="300" height="300">
-
-In the above image, base_link is grounded. Right-click it and click "Unground". 
-
-Now you can run the script. Let's run the script. Choose the folder to save and wait for a few seconds. You will see many "old_components" in the components field, please ignore them. 
-
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/result.PNG" alt="results" title="results" width="250" height="300">
-
-You have successfully exported the urdf file. Also, you got `.stl` files in the "Desktop/test/mm_stl" repository. This will be required at the next step. The existing fusion CAD file is no more needed. You can delete it. 
-
-The folder "Desktop/test" will be required in the next step. Move them into your ros environment.
-
-
-#### In your ROS environment
-
-Place the generated _description package directory in your own ROS workspace. "catkin_ws" is used in this example.
-Then, run catkin_make in catkin_ws.
-
-```bash
-cd ~/catkin_ws/
-catkin_make
-source devel/setup.bash
+```text
+Robot design root
+├── base_link
+│   ├── chassis
+│   └── electronics
+├── link1
+│   ├── arm casting
+│   └── bearings
+├── link2
+│   └── wrist assembly
+└── gripper                 optional
+    ├── PincOpen            optional special visual
+    └── camera              optional special visual
 ```
 
-Now you can see your robot in rviz. You can see it by the following command.
+Use these rules:
 
-```bash
-roslaunch (whatever your robot_name is)_description display.launch
+1. Name the first root-level link `base_link`. `link0` is also accepted and is exported as `base_link`.
+2. Name the moving links `link1`, `link2`, and so on, with no gaps in the chain.
+3. Put any detailed CAD hierarchy inside the appropriate root-level link. Joints wholly inside one link are intentionally left out of the URDF.
+4. Connect neighbouring links with Fusion **Revolute** or **Slider** joints. The exported chain is `base_link → link1 → link2 → …`.
+5. Set both minimum and maximum limits on every Slider joint. A Revolute joint with no limits becomes a continuous joint.
+6. Keep the model Z axis upright if you want it upright in the exported viewer.
+7. If present, name the final root-level tool `gripper`. It is attached to the highest-numbered link with a fixed joint when no suitable joint already exists.
+
+Names are sanitised for URDF use, but the numbered chain names above should be used exactly. Non-adjacent joints, unsupported joint types, duplicate joints between the same exported links, and joints that cannot be mapped to root-level links are skipped.
+
+## Export a URDF
+
+1. Open the design in Fusion 360.
+2. Open **Utilities → Add-Ins → Scripts and Add-Ins**.
+3. On the **Scripts** tab, select `URDF_Exporter` and click **Run**.
+4. Choose the parent folder for the export.
+5. Enter one of the export profiles when prompted:
+
+   - `tabletop` keeps `base_link` as the URDF root.
+   - `humanoid-left` adds `humanoid_root`, mounts the arm at shoulder height, and rotates it +90° around Z.
+   - `humanoid-right` does the same for the right side with a -90° Z rotation.
+
+6. Wait for the success message. It shows the selected profile and the exact output directory.
+
+The robot name comes from the first word of the Fusion root-component name. A typical export looks like this:
+
+```text
+my_robot/
+├── urdf/
+│   └── my_robot.urdf
+├── meshes/
+│   ├── base_link.obj       coloured visual mesh
+│   ├── base_link.mtl
+│   ├── base_link.stl       collision mesh
+│   ├── link1.obj
+│   ├── link1.mtl
+│   └── link1.stl
+└── gripper_visual_debug.json
 ```
 
-<img src="https://github.com/syuntoku14/fusion2urdf/blob/images/rviz_robot.png" alt="rviz" title="rviz" width="300" height="300">
+Open `urdf/my_robot.urdf` in your URDF loader or viewer. Mesh references are relative (`../meshes/...`), so keep the `urdf` and `meshes` directories together. If your application serves assets in a browser, serve the whole export directory rather than opening the URDF as an isolated file.
 
-If you want to simulate your robot on gazebo, just run
-```bash
-roslaunch (whatever your robot_name is)_description gazebo.launch
+## Export profiles and joint limits
+
+The last selected profile is remembered. Export settings live here:
+
+- Windows: `%APPDATA%\Fusion2URDF\settings.json`
+- macOS: `~/.fusion2urdf/settings.json`
+
+The exporter names chain joints from their links, for example `base_link_to_link1` and `link1_to_link2`. You can override limits by those exported names:
+
+```json
+{
+  "export_profile": "tabletop",
+  "center_positive_joint_limits": true,
+  "joint_limits": {
+    "base_link_to_link1": {
+      "degrees": [-90, 90]
+    },
+    "link1_to_link2": {
+      "radians": [-1.2, 1.2]
+    }
+  }
+}
 ```
 
-**Enjoy your Fusion 360 and ROS life!**
+With `center_positive_joint_limits` enabled, a positive-only Fusion revolute range is centred around zero while preserving its total travel. Explicit `joint_limits` entries take priority.
 
+For humanoid profiles, the shoulder height is taken from the model when the arm is already positioned at body height. For a tabletop-modelled arm, the exporter estimates shoulder height from the chain length, falling back to 0.45 m when necessary.
 
+## Diagnose a difficult model
 
-# Citation
+Run `Fusion2URDF_Diagnostics` from Fusion's **Scripts** tab before changing a model just to make it export. The diagnostics script is read-only with respect to the design. Choose an output folder and it creates a timestamped report containing:
 
-```
+- `summary.txt` with link and joint counts;
+- `fusion2urdf_diagnostics.json` with the component tree, link mapping, joint endpoints, included joints, and skip reasons;
+- `fusion_view.png` showing the active viewport at the time of the report.
+
+The most useful section is `exporter_preview`. Check that it finds exactly one `base_link`, assigns the expected root occurrences to `link1`, `link2`, and so on, and includes one joint for every adjacent pair.
+
+## Current boundaries
+
+- The generated file is plain URDF, not the ROS 1 description package generated by the original project.
+- The automatic kinematic layout is a single numbered chain with an optional fixed gripper. Branched trees and closed kinematic loops need manual URDF work after export.
+- Revolute and Slider joints are exported. Other Fusion joint types are skipped.
+- Each normal link gets one visual material based on the first usable Fusion appearance found in that occurrence tree.
+- The `PincOpen` and camera split-visual behaviour is name-based and specific to a `gripper` root-level link.
+
+## Credits and citation
+
+This project remains rooted in Toshinori Kitamura's original Fusion2URDF work. If you use it in academic work, cite the original project:
+
+```bibtex
 @misc{toshinori2020fusion2urdf,
-    author = {Toshinori Kitamura},
-    title = {Fusion2URDF},
-    year = {2020},
-    publisher = {GitHub},
-    journal = {GitHub repository},
-    howpublished = {\url{https://github.com/syuntoku14/fusion2urdf}}
+  author       = {Toshinori Kitamura},
+  title        = {Fusion2URDF},
+  year         = {2020},
+  publisher    = {GitHub},
+  journal      = {GitHub repository},
+  howpublished = {\url{https://github.com/syuntoku14/fusion2urdf}}
 }
 ```
